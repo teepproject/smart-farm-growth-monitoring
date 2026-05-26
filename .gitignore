@@ -1,0 +1,12 @@
+node_modules/
+.env
+dist/
+.DS_Store
+
+web-dashboard/.env
+web-dashboard/node_modules/
+web-dashboard/dist/
+
+supabase-bridge/.env
+supabase-bridge/node_modules/
+supabase-bridge/logs/
