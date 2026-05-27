@@ -9,11 +9,10 @@
   - RTC DS3231
   - Relay pin 8, 9, 10
   - Send JSON telemetry to ESP8266 using Serial1
-  - Receive command from ESP8266 using Serial1
 
   ESP8266 Wiring:
-    Mega TX1 pin 18 -> ESP8266 D5 / GPIO14
-    Mega RX1 pin 19 <- ESP8266 D6 / GPIO12
+    Mega TX1 pin 18 -> ESP8266 D1 / GPIO5
+    Mega RX1 pin 19 <- ESP8266 D2 / GPIO4
     Mega GND        -> ESP8266 GND
 
   Serial Monitor Arduino Mega:
@@ -172,7 +171,7 @@ unsigned long lastTelemetryMillis = 0;
 const unsigned long telemetryInterval = 5000;
 
 // Mega Serial1 to ESP8266
-const unsigned long espSerialBaud = 9600;
+const unsigned long espSerialBaud = 4800;
 
 // ==================================================
 // HELPER FUNCTIONS
@@ -363,99 +362,6 @@ void forceAllRelaysOff() {
   Serial.println(">>> All relays OFF");
 }
 
-// ==================================================
-// COMMAND FROM ESP8266 / THINGSBOARD RPC
-// ==================================================
-//
-// ESP8266 akan mengirim command dari ThingsBoard RPC ke Mega lewat Serial1.
-// Format command yang diterima:
-//   PUMP_1_ON
-//   PUMP_1_OFF
-//   PUMP_2_ON
-//   PUMP_2_OFF
-//   PUMP_3_ON
-//   PUMP_3_OFF
-//
-// Catatan keamanan:
-// Command ON menggunakan fungsi startRelayX(), jadi pompa tetap otomatis
-// mati setelah relayXOnDuration agar tidak menyala terus jika ada masalah koneksi.
-
-void setRelay1FromCommand(bool turnOn, uint32_t currentTime) {
-  if (turnOn) {
-    startRelay1(currentTime);
-  } else {
-    relay1State = false;
-    relayOff(relay1Pin);
-    Serial.println(">>> Relay 1 / Zone 1 OFF from ESP command");
-  }
-}
-
-void setRelay2FromCommand(bool turnOn, uint32_t currentTime) {
-  if (turnOn) {
-    startRelay2(currentTime);
-  } else {
-    relay2State = false;
-    relayOff(relay2Pin);
-    Serial.println(">>> Relay 2 / Zone 2 OFF from ESP command");
-  }
-}
-
-void setRelay3FromCommand(bool turnOn, uint32_t currentTime) {
-  if (turnOn) {
-    startRelay3(currentTime);
-  } else {
-    relay3State = false;
-    relayOff(relay3Pin);
-    Serial.println(">>> Relay 3 / Zone 3 OFF from ESP command");
-  }
-}
-
-void handleCommandFromESP(uint32_t currentTime) {
-  while (Serial1.available()) {
-    String cmd = Serial1.readStringUntil('\n');
-    cmd.trim();
-    cmd.toUpperCase();
-
-    if (cmd.length() == 0) {
-      return;
-    }
-
-    Serial.println();
-    Serial.println("========== COMMAND FROM ESP8266 ==========");
-    Serial.print("Command: ");
-    Serial.println(cmd);
-
-    if (cmd == "PUMP_1_ON") {
-      setRelay1FromCommand(true, currentTime);
-    }
-    else if (cmd == "PUMP_1_OFF") {
-      setRelay1FromCommand(false, currentTime);
-    }
-    else if (cmd == "PUMP_2_ON") {
-      setRelay2FromCommand(true, currentTime);
-    }
-    else if (cmd == "PUMP_2_OFF") {
-      setRelay2FromCommand(false, currentTime);
-    }
-    else if (cmd == "PUMP_3_ON") {
-      setRelay3FromCommand(true, currentTime);
-    }
-    else if (cmd == "PUMP_3_OFF") {
-      setRelay3FromCommand(false, currentTime);
-    }
-    else if (cmd == "PUMP_ALL_OFF" || cmd == "ALL_OFF") {
-      forceAllRelaysOff();
-    }
-    else {
-      Serial.print("Unknown ESP command: ");
-      Serial.println(cmd);
-    }
-
-    printRelayStatus();
-    Serial.println("==========================================");
-  }
-}
-
 void handleRelayTestCommand(uint32_t currentTime) {
   if (Serial.available()) {
     String command = Serial.readStringUntil('\n');
@@ -492,6 +398,102 @@ void handleRelayTestCommand(uint32_t currentTime) {
     }
   }
 }
+
+
+// ==================================================
+// ESP8266 COMMAND READER
+// ==================================================
+
+String espCommandBuffer = "";
+
+void readCommandFromESP8266() {
+  while (Serial1.available() > 0) {
+    char c = Serial1.read();
+
+    if (c == '\r') {
+      continue;
+    }
+
+    if (c == '\n') {
+      espCommandBuffer.trim();
+
+      if (espCommandBuffer.length() > 0) {
+        processESPCommandLine(espCommandBuffer);
+      }
+
+      espCommandBuffer = "";
+      continue;
+    }
+
+    espCommandBuffer += c;
+
+    // Jika ada data rusak/panjang, reset buffer agar sistem tidak macet.
+    if (espCommandBuffer.length() > 140) {
+      Serial.println();
+      Serial.print("ESP command buffer overflow, cleared: ");
+      Serial.println(espCommandBuffer);
+      espCommandBuffer = "";
+    }
+  }
+}
+
+void processESPCommandLine(String line) {
+  line.trim();
+
+  Serial.println();
+  Serial.println("========== COMMAND FROM ESP8266 ==========");
+  Serial.print("Raw Line: ");
+  Serial.println(line);
+
+  int cmdIndex = line.indexOf("CMD:");
+
+  if (cmdIndex < 0) {
+    Serial.println("Ignored: no CMD prefix found");
+    Serial.println("==========================================");
+    return;
+  }
+
+  String command = line.substring(cmdIndex + 4);
+  command.trim();
+
+  Serial.print("Parsed Command: ");
+  Serial.println(command);
+
+  uint32_t currentTime = rtc.now().unixtime();
+
+  if (command == "PUMP_1_ON") {
+    startRelay1(currentTime);
+  }
+  else if (command == "PUMP_1_OFF") {
+    relay1State = false;
+    relayOff(relay1Pin);
+    Serial.println(">>> Relay 1 / Zone 1 OFF");
+  }
+  else if (command == "PUMP_2_ON") {
+    startRelay2(currentTime);
+  }
+  else if (command == "PUMP_2_OFF") {
+    relay2State = false;
+    relayOff(relay2Pin);
+    Serial.println(">>> Relay 2 / Zone 2 OFF");
+  }
+  else if (command == "PUMP_3_ON") {
+    startRelay3(currentTime);
+  }
+  else if (command == "PUMP_3_OFF") {
+    relay3State = false;
+    relayOff(relay3Pin);
+    Serial.println(">>> Relay 3 / Zone 3 OFF");
+  }
+  else {
+    Serial.print("Unknown ESP command: ");
+    Serial.println(command);
+  }
+
+  printRelayStatus();
+  Serial.println("==========================================");
+}
+
 
 // ==================================================
 // DATE / EXPERIMENT DAY FUNCTION
@@ -631,14 +633,6 @@ void sendTelemetryToESP(DateTime now, float temperature, float humidity) {
   payload += "\"soil_z3_s1\":" + String(moisturePercent[4]) + ",";
   payload += "\"soil_z3_s2\":" + String(moisturePercent[5]) + ",";
 
-  // Duplicate field names for Supabase/web dashboard mapping
-  payload += "\"soil_a0\":" + String(moisturePercent[0]) + ",";
-  payload += "\"soil_a1\":" + String(moisturePercent[1]) + ",";
-  payload += "\"soil_a2\":" + String(moisturePercent[2]) + ",";
-  payload += "\"soil_a3\":" + String(moisturePercent[3]) + ",";
-  payload += "\"soil_a4\":" + String(moisturePercent[4]) + ",";
-  payload += "\"soil_a5\":" + String(moisturePercent[5]) + ",";
-
   payload += "\"soil_z1_avg\":" + String(zone1Avg) + ",";
   payload += "\"soil_z2_avg\":" + String(zone2Avg) + ",";
   payload += "\"soil_z3_avg\":" + String(zone3Avg) + ",";
@@ -657,11 +651,6 @@ void sendTelemetryToESP(DateTime now, float temperature, float humidity) {
   payload += "\"pump_z2\":" + String(pump_z2) + ",";
   payload += "\"pump_z3\":" + String(pump_z3) + ",";
 
-  // Duplicate field names for Supabase/web dashboard mapping
-  payload += "\"pump_1\":" + String(pump_z1) + ",";
-  payload += "\"pump_2\":" + String(pump_z2) + ",";
-  payload += "\"pump_3\":" + String(pump_z3) + ",";
-
   payload += "\"pump_z1_status\":\"" + String(relay1State ? "ON" : "OFF") + "\",";
   payload += "\"pump_z2_status\":\"" + String(relay2State ? "ON" : "OFF") + "\",";
   payload += "\"pump_z3_status\":\"" + String(relay3State ? "ON" : "OFF") + "\",";
@@ -678,6 +667,10 @@ void sendTelemetryToESP(DateTime now, float temperature, float humidity) {
   Serial.println(payload);
 
   Serial1.println(payload);
+  Serial1.flush();
+
+  // Langsung cek command setelah telemetry dikirim.
+  readCommandFromESP8266();
 }
 
 // ==================================================
@@ -799,7 +792,6 @@ void setup() {
   Serial1.begin(espSerialBaud);
 
   Serial.setTimeout(50);
-  Serial1.setTimeout(50);
 
   delay(1000);
 
@@ -878,13 +870,17 @@ void setup() {
 // ==================================================
 
 void loop() {
+  readCommandFromESP8266();
+
   DateTime now = rtc.now();
   uint32_t currentTime = now.unixtime();
 
+  readCommandFromESP8266();
   handleRelayTestCommand(currentTime);
-  handleCommandFromESP(currentTime);
+  readCommandFromESP8266();
 
   readSoilSensors();
+  readCommandFromESP8266();
 
   float humidity = dht.readHumidity();
   float temperature = dht.readTemperature();
@@ -903,13 +899,19 @@ void loop() {
     handleRealIrrigationSchedule(now, currentTime);
   }
 
+  readCommandFromESP8266();
+
   if (millis() - lastPrintMillis >= printInterval) {
     lastPrintMillis = millis();
     printMonitoringData(now, temperature, humidity);
+    readCommandFromESP8266();
   }
 
   if (millis() - lastTelemetryMillis >= telemetryInterval) {
     lastTelemetryMillis = millis();
     sendTelemetryToESP(now, temperature, humidity);
+    readCommandFromESP8266();
   }
+
+  readCommandFromESP8266();
 }
