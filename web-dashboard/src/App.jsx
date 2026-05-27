@@ -15,7 +15,11 @@ import "./App.css";
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+const isSupabaseReady = Boolean(supabaseUrl && supabaseAnonKey);
+
+const supabase = isSupabaseReady
+  ? createClient(supabaseUrl, supabaseAnonKey)
+  : null;
 
 const SENSOR_TABLE = "sensor_readings";
 const COMMAND_TABLE = "device_commands";
@@ -30,13 +34,30 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [actionMessage, setActionMessage] = useState("");
 
-  async function fetchAllData() {
-    setLoading(true);
+  async function fetchAllData(showLoading = true) {
+    if (!supabase) {
+      setLoading(false);
+      setErrorMessage(
+        "Supabase belum dikonfigurasi. Periksa VITE_SUPABASE_URL dan VITE_SUPABASE_ANON_KEY."
+      );
+      return;
+    }
+
+    if (showLoading) {
+      setLoading(true);
+    }
+
     setErrorMessage("");
 
-    await Promise.all([fetchSensorData(), fetchCommands(), fetchCaptures()]);
-
-    setLoading(false);
+    try {
+      await Promise.all([fetchSensorData(), fetchCommands(), fetchCaptures()]);
+    } catch (error) {
+      setErrorMessage(error.message || "Gagal mengambil data.");
+    } finally {
+      if (showLoading) {
+        setLoading(false);
+      }
+    }
   }
 
   async function fetchSensorData() {
@@ -45,6 +66,7 @@ function App() {
       .select("*")
       .not("soil_a0", "is", null)
       .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
       .limit(60);
 
     if (error) {
@@ -61,6 +83,7 @@ function App() {
       .from(COMMAND_TABLE)
       .select("*")
       .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
       .limit(10);
 
     if (!error) {
@@ -73,6 +96,7 @@ function App() {
       .from(CAMERA_TABLE)
       .select("*")
       .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
       .limit(6);
 
     if (!error) {
@@ -81,6 +105,11 @@ function App() {
   }
 
   async function sendCommand(command, value, payload = {}) {
+    if (!supabase) {
+      setActionMessage("Supabase belum siap. Periksa konfigurasi environment.");
+      return;
+    }
+
     setActionMessage("");
 
     const { error } = await supabase.from(COMMAND_TABLE).insert({
@@ -116,6 +145,11 @@ function App() {
   }
 
   async function downloadCSV() {
+    if (!supabase) {
+      setActionMessage("Supabase belum siap. Periksa konfigurasi environment.");
+      return;
+    }
+
     const { data, error } = await supabase
       .from(SENSOR_TABLE)
       .select("*")
@@ -138,15 +172,44 @@ function App() {
       "device_id",
       "temperature",
       "humidity",
+
       "soil_a0",
       "soil_a1",
       "soil_a2",
       "soil_a3",
       "soil_a4",
       "soil_a5",
+
+      "soil_z1_s1",
+      "soil_z1_s2",
+      "soil_z2_s1",
+      "soil_z2_s2",
+      "soil_z3_s1",
+      "soil_z3_s2",
+
+      "soil_z1_avg",
+      "soil_z2_avg",
+      "soil_z3_avg",
+
+      "raw_a0",
+      "raw_a1",
+      "raw_a2",
+      "raw_a3",
+      "raw_a4",
+      "raw_a5",
+
       "pump_1",
       "pump_2",
       "pump_3",
+
+      "pump_z1_status",
+      "pump_z2_status",
+      "pump_z3_status",
+
+      "rtc_hour",
+      "rtc_minute",
+      "rtc_second",
+      "experiment_day",
     ];
 
     const csvRows = [
@@ -163,37 +226,43 @@ function App() {
 
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
+
     link.href = url;
     link.download = `smart-farm-sensor-data-${Date.now()}.csv`;
     link.click();
+
     URL.revokeObjectURL(url);
 
     setActionMessage("CSV berhasil dibuat dan di-download.");
   }
 
   useEffect(() => {
-    fetchAllData();
+    fetchAllData(true);
+
+    if (!supabase) {
+      return;
+    }
 
     const channel = supabase
       .channel("smart_farm_dashboard_realtime")
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: SENSOR_TABLE },
-        fetchAllData
+        () => fetchAllData(false)
       )
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: COMMAND_TABLE },
-        fetchAllData
+        () => fetchAllData(false)
       )
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: CAMERA_TABLE },
-        fetchAllData
+        () => fetchAllData(false)
       )
       .subscribe();
 
-    const interval = setInterval(fetchAllData, 10000);
+    const interval = setInterval(() => fetchAllData(false), 10000);
 
     return () => {
       supabase.removeChannel(channel);
@@ -265,7 +334,7 @@ function App() {
           </p>
         </div>
 
-        <button onClick={fetchAllData}>Refresh Data</button>
+        <button onClick={() => fetchAllData(true)}>Refresh Data</button>
       </section>
 
       {loading && <p className="info">Mengambil data dari Supabase...</p>}
@@ -278,6 +347,12 @@ function App() {
       )}
 
       {actionMessage && <div className="message">{actionMessage}</div>}
+
+      {!loading && !latestData && !errorMessage && (
+        <div className="empty">
+          Belum ada data sensor di tabel <code>{SENSOR_TABLE}</code>.
+        </div>
+      )}
 
       {latestData && (
         <>
@@ -304,11 +379,13 @@ function App() {
                 onTurnOn={() => controlPump(1, true)}
                 onTurnOff={() => controlPump(1, false)}
               />
+
               <ControlBox
                 title="Pompa Zona 2"
                 onTurnOn={() => controlPump(2, true)}
                 onTurnOff={() => controlPump(2, false)}
               />
+
               <ControlBox
                 title="Pompa Zona 3"
                 onTurnOn={() => controlPump(3, true)}
@@ -346,6 +423,7 @@ function App() {
 
           <section className="panel">
             <h2>Kelembapan Tanah</h2>
+
             <div className="soil-grid">
               {soilSensors.map((sensor) => (
                 <SoilCard
@@ -382,6 +460,7 @@ function App() {
 
           <section className="panel">
             <h2>Riwayat Data Terbaru</h2>
+
             <div className="table-wrapper">
               <table>
                 <thead>
@@ -397,6 +476,7 @@ function App() {
                     <th>A5</th>
                   </tr>
                 </thead>
+
                 <tbody>
                   {history.slice(0, 20).map((row) => (
                     <tr key={row.id}>
@@ -418,6 +498,7 @@ function App() {
 
           <section className="panel">
             <h2>Riwayat Command</h2>
+
             <div className="table-wrapper">
               <table>
                 <thead>
@@ -429,6 +510,7 @@ function App() {
                     <th>Response</th>
                   </tr>
                 </thead>
+
                 <tbody>
                   {commands.map((row) => (
                     <tr key={row.id}>
@@ -506,6 +588,7 @@ function ControlBox({ title, onTurnOn, onTurnOff }) {
   return (
     <div className="control-box">
       <h3>{title}</h3>
+
       <div>
         <button onClick={onTurnOn}>ON</button>
         <button className="danger" onClick={onTurnOff}>
@@ -580,7 +663,7 @@ function SoilRealtimeChart({ data }) {
 
   return (
     <div className="chart-box">
-      <ResponsiveContainer width="100%" height={340}>
+      <ResponsiveContainer width="100%" height={420}>
         <LineChart data={data}>
           <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
           <XAxis dataKey="time" stroke="#94a3b8" />
@@ -613,7 +696,7 @@ function AirRealtimeChart({ data }) {
 
   return (
     <div className="chart-box">
-      <ResponsiveContainer width="100%" height={320}>
+      <ResponsiveContainer width="100%" height={400}>
         <LineChart data={data}>
           <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
           <XAxis dataKey="time" stroke="#94a3b8" />
@@ -651,24 +734,35 @@ function AirRealtimeChart({ data }) {
 }
 
 function CctvRealtimePanel() {
-  const CCTV_URL = "";
+  const CCTV_URL = import.meta.env.VITE_CCTV_ZONE_1_URL || "";
 
   if (!CCTV_URL) {
     return (
       <div className="cctv-placeholder">
         <h3>CCTV Zone 1 belum disambungkan</h3>
         <p>
-          Nanti panel ini bisa menampilkan stream realtime dari CCTV. Kalau kamera
-          hanya punya RTSP, kita perlu bridge di Ubuntu untuk mengubah RTSP
-          menjadi MJPEG/HLS agar bisa tampil di browser.
+          Panel ini disiapkan untuk menampilkan stream realtime CCTV. Jika kamera
+          hanya menyediakan RTSP, diperlukan bridge di server/Ubuntu untuk
+          mengubah RTSP menjadi MJPEG/HLS agar bisa tampil di browser.
         </p>
       </div>
     );
   }
 
   return (
-    <div className="cctv-wrapper">
-      <img src={CCTV_URL} alt="CCTV Zone 1 Realtime" />
+    <div className="cctv-live-layout">
+      <div className="cctv-wrapper">
+        <img src={CCTV_URL} alt="CCTV Zone 1 Realtime" />
+      </div>
+
+      <div className="cctv-info">
+        <h3>Zone 1 Live Camera</h3>
+        <p>
+          Status: <b>Connected</b>
+        </p>
+        <p>Source:</p>
+        <code>{CCTV_URL}</code>
+      </div>
     </div>
   );
 }
@@ -719,13 +813,26 @@ function showValue(value) {
 
 function formatDate(value) {
   if (!value) return "-";
-  return new Date(value).toLocaleString("id-ID");
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "-";
+  }
+
+  return date.toLocaleString("id-ID");
 }
 
 function formatTime(value) {
   if (!value) return "-";
 
-  return new Date(value).toLocaleTimeString("id-ID", {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "-";
+  }
+
+  return date.toLocaleTimeString("id-ID", {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
@@ -741,6 +848,14 @@ function getDeviceStatus(data) {
   }
 
   const lastUpdate = new Date(data.created_at).getTime();
+
+  if (Number.isNaN(lastUpdate)) {
+    return {
+      label: "Unknown",
+      status: "unknown",
+    };
+  }
+
   const now = Date.now();
   const diffSeconds = Math.floor((now - lastUpdate) / 1000);
 
