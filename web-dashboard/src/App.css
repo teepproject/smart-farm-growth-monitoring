@@ -568,3 +568,67 @@ code {
     height: 300px;
   }
 }
+
+.download-panel {
+  margin-top: 20px;
+  padding: 18px;
+  border-radius: 18px;
+  background: #020617;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.download-panel h3 {
+  margin: 0 0 14px;
+  color: #f8fafc;
+}
+
+.date-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.date-filter-grid label {
+  display: grid;
+  gap: 8px;
+  color: #94a3b8;
+  font-weight: bold;
+}
+
+.date-filter-grid input {
+  width: 100%;
+  border: 1px solid #334155;
+  border-radius: 12px;
+  padding: 12px;
+  background: #0f172a;
+  color: #e5e7eb;
+  font: inherit;
+}
+
+.date-filter-grid input:focus {
+  outline: none;
+  border-color: #22c55e;
+}
+
+.preset-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+button.secondary {
+  background: #1e293b;
+  color: #e5e7eb;
+}
+
+button.secondary:hover {
+  background: #334155;
+}
+
+@media (max-width: 900px) {
+  .date-filter-grid {
+    grid-template-columns: 1fr;
+  }
+}

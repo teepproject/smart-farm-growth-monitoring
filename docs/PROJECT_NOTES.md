@@ -39,6 +39,11 @@ Sistem ini digunakan untuk monitoring dan automatic irrigation pada smart farm.
 - Dashboard dapat dibuka dari perangkat lain menggunakan `http://100.83.225.103:8080`
 - Supabase bridge berhasil dijalankan otomatis melalui Task Scheduler
 - Data telemetry berhasil masuk ke Supabase
+- Final ESP-Mega wiring:
+- Mega TX1 pin 18 -> ESP D1
+- Mega RX1 pin 19 <- ESP D2
+- Baud Serial1/SoftwareSerial = 4800
+- Relay command from website uses CMD:PUMP_X_ON/OFF
 
 # Supabase Bridge
 

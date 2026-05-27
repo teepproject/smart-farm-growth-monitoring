@@ -34,6 +34,13 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [actionMessage, setActionMessage] = useState("");
 
+  const [csvStartDate, setCsvStartDate] = useState(() =>
+    toDateTimeLocalInput(new Date(Date.now() - 24 * 60 * 60 * 1000))
+  );
+  const [csvEndDate, setCsvEndDate] = useState(() =>
+    toDateTimeLocalInput(new Date())
+  );
+
   async function fetchAllData(showLoading = true) {
     if (!supabase) {
       setLoading(false);
@@ -144,18 +151,61 @@ function App() {
     });
   }
 
-  async function downloadCSV() {
+  function setCsvPresetHours(hours) {
+    const end = new Date();
+    const start = new Date(end.getTime() - hours * 60 * 60 * 1000);
+
+    setCsvStartDate(toDateTimeLocalInput(start));
+    setCsvEndDate(toDateTimeLocalInput(end));
+  }
+
+  function clearCsvPeriod() {
+    setCsvStartDate("");
+    setCsvEndDate("");
+  }
+  
+    async function downloadCSV() {
     if (!supabase) {
       setActionMessage("Supabase belum siap. Periksa konfigurasi environment.");
       return;
     }
 
-    const { data, error } = await supabase
+    setActionMessage("");
+
+    const startDate = csvStartDate ? new Date(csvStartDate) : null;
+    const endDate = csvEndDate ? new Date(csvEndDate) : null;
+
+    if (startDate && Number.isNaN(startDate.getTime())) {
+      setActionMessage("Tanggal awal tidak valid.");
+      return;
+    }
+
+    if (endDate && Number.isNaN(endDate.getTime())) {
+      setActionMessage("Tanggal akhir tidak valid.");
+      return;
+    }
+
+    if (startDate && endDate && startDate > endDate) {
+      setActionMessage("Tanggal awal tidak boleh lebih besar dari tanggal akhir.");
+      return;
+    }
+
+    let query = supabase
       .from(SENSOR_TABLE)
       .select("*")
-      .not("soil_a0", "is", null)
-      .order("created_at", { ascending: false })
-      .limit(1000);
+      .not("soil_a0", "is", null);
+
+    if (startDate) {
+      query = query.gte("created_at", startDate.toISOString());
+    }
+
+    if (endDate) {
+      query = query.lte("created_at", endDate.toISOString());
+    }
+
+    query = query.order("created_at", { ascending: true }).limit(10000);
+
+    const { data, error } = await query;
 
     if (error) {
       setActionMessage(`Gagal download CSV: ${error.message}`);
@@ -163,7 +213,7 @@ function App() {
     }
 
     if (!data || data.length === 0) {
-      setActionMessage("Belum ada data untuk di-download.");
+      setActionMessage("Tidak ada data pada periode yang dipilih.");
       return;
     }
 
@@ -215,7 +265,7 @@ function App() {
     const csvRows = [
       columns.join(","),
       ...data.map((row) =>
-        columns.map((column) => `"${row[column] ?? ""}"`).join(",")
+        columns.map((column) => csvEscape(row[column])).join(",")
       ),
     ];
 
@@ -227,13 +277,21 @@ function App() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
 
+    const startLabel = csvStartDate || "awal";
+    const endLabel = csvEndDate || "akhir";
+    const periodLabel = `${startLabel}_to_${endLabel}`
+      .replaceAll(":", "-")
+      .replaceAll("T", "_");
+
     link.href = url;
-    link.download = `smart-farm-sensor-data-${Date.now()}.csv`;
+    link.download = `smart-farm-sensor-data-${periodLabel}.csv`;
     link.click();
 
     URL.revokeObjectURL(url);
 
-    setActionMessage("CSV berhasil dibuat dan di-download.");
+    setActionMessage(
+      `CSV berhasil di-download. Jumlah data: ${data.length} baris.`
+    );
   }
 
   useEffect(() => {
@@ -393,8 +451,61 @@ function App() {
               />
             </div>
 
+                        <div className="download-panel">
+              <h3>Download CSV Berdasarkan Periode</h3>
+
+              <div className="date-filter-grid">
+                <label>
+                  Dari
+                  <input
+                    type="datetime-local"
+                    value={csvStartDate}
+                    onChange={(event) => setCsvStartDate(event.target.value)}
+                  />
+                </label>
+
+                <label>
+                  Sampai
+                  <input
+                    type="datetime-local"
+                    value={csvEndDate}
+                    onChange={(event) => setCsvEndDate(event.target.value)}
+                  />
+                </label>
+              </div>
+
+              <div className="preset-row">
+                <button className="secondary" onClick={() => setCsvPresetHours(1)}>
+                  1 Jam
+                </button>
+
+                <button className="secondary" onClick={() => setCsvPresetHours(24)}>
+                  24 Jam
+                </button>
+
+                <button className="secondary" onClick={() => setCsvPresetHours(24 * 7)}>
+                  7 Hari
+                </button>
+
+                <button className="secondary" onClick={() => setCsvPresetHours(24 * 30)}>
+                  30 Hari
+                </button>
+
+                <button className="secondary" onClick={clearCsvPeriod}>
+                  Semua Data
+                </button>
+
+                <button onClick={downloadCSV}>Download CSV</button>
+              </div>
+
+              <p className="note">
+                CSV akan diambil dari tabel sensor berdasarkan kolom{" "}
+                <b>created_at</b>. Jika memilih “Semua Data”, batas maksimal
+                sementara adalah 10.000 baris.
+              </p>
+            </div>
+
             <div className="action-row">
-              <button onClick={downloadCSV}>Download Data CSV</button>
               <button onClick={requestCameraCapture}>Capture CCTV Zone 1</button>
             </div>
 
@@ -804,6 +915,19 @@ function toChartNumber(value) {
 
   const numberValue = Number(value);
   return Number.isNaN(numberValue) ? null : numberValue;
+}
+
+function csvEscape(value) {
+  const text = String(value ?? "");
+  return `"${text.replaceAll('"', '""')}"`;
+}
+
+function toDateTimeLocalInput(date) {
+  const pad = (number) => String(number).padStart(2, "0");
+
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(
+    date.getDate()
+  )}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 function showValue(value) {
