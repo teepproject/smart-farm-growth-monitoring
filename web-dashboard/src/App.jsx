@@ -91,7 +91,7 @@ function App() {
       .select("*")
       .order("created_at", { ascending: false })
       .order("id", { ascending: false })
-      .limit(10);
+      .limit(20);
 
     if (!error) {
       setCommands(data || []);
@@ -119,18 +119,28 @@ function App() {
 
     setActionMessage("");
 
-    const { error } = await supabase.from(COMMAND_TABLE).insert({
+    const newCommand = {
       device_id: "esp8266-zone-1",
       command,
       value,
       payload,
       status: "pending",
       source: "web-dashboard",
-    });
+    };
+
+    const { data, error } = await supabase
+      .from(COMMAND_TABLE)
+      .insert(newCommand)
+      .select("*")
+      .single();
 
     if (error) {
       setActionMessage(`Gagal membuat command: ${error.message}`);
       return;
+    }
+
+    if (data) {
+      setCommands((previousCommands) => [data, ...previousCommands].slice(0, 20));
     }
 
     setActionMessage(`Command "${command}" berhasil dikirim ke Supabase.`);
@@ -163,8 +173,8 @@ function App() {
     setCsvStartDate("");
     setCsvEndDate("");
   }
-  
-    async function downloadCSV() {
+
+  async function downloadCSV() {
     if (!supabase) {
       setActionMessage("Supabase belum siap. Periksa konfigurasi environment.");
       return;
@@ -337,29 +347,6 @@ function App() {
     { name: "A5", key: "soil_a5" },
   ];
 
-  const zoneSummaries = latestData
-    ? [
-        {
-          name: "Zona 1",
-          sensors: "A0 + A1",
-          value: average([latestData.soil_a0, latestData.soil_a1]),
-          pump: latestData.pump_1,
-        },
-        {
-          name: "Zona 2",
-          sensors: "A2 + A3",
-          value: average([latestData.soil_a2, latestData.soil_a3]),
-          pump: latestData.pump_2,
-        },
-        {
-          name: "Zona 3",
-          sensors: "A4 + A5",
-          value: average([latestData.soil_a4, latestData.soil_a5]),
-          pump: latestData.pump_3,
-        },
-      ]
-    : [];
-
   const chartData = [...history].reverse().map((row) => ({
     time: formatTime(row.created_at),
 
@@ -379,6 +366,36 @@ function App() {
   }));
 
   const deviceStatus = getDeviceStatus(latestData);
+
+  const pump1Status = getPumpDisplayStatus(latestData, commands, 1);
+  const pump2Status = getPumpDisplayStatus(latestData, commands, 2);
+  const pump3Status = getPumpDisplayStatus(latestData, commands, 3);
+
+  const zoneSummaries = latestData
+    ? [
+        {
+          name: "Zona 1",
+          sensors: "A0 + A1",
+          value: average([latestData.soil_a0, latestData.soil_a1]),
+          pump: pump1Status.value,
+          pumpSource: pump1Status.source,
+        },
+        {
+          name: "Zona 2",
+          sensors: "A2 + A3",
+          value: average([latestData.soil_a2, latestData.soil_a3]),
+          pump: pump2Status.value,
+          pumpSource: pump2Status.source,
+        },
+        {
+          name: "Zona 3",
+          sensors: "A4 + A5",
+          value: average([latestData.soil_a4, latestData.soil_a5]),
+          pump: pump3Status.value,
+          pumpSource: pump3Status.source,
+        },
+      ]
+    : [];
 
   return (
     <main className="dashboard">
@@ -417,9 +434,9 @@ function App() {
           <section className="grid">
             <Card title="Suhu Udara" value={latestData.temperature} unit="°C" />
             <Card title="Kelembapan Udara" value={latestData.humidity} unit="%" />
-            <Card title="Pompa Zona 1" value={latestData.pump_1 ? "ON" : "OFF"} />
-            <Card title="Pompa Zona 2" value={latestData.pump_2 ? "ON" : "OFF"} />
-            <Card title="Pompa Zona 3" value={latestData.pump_3 ? "ON" : "OFF"} />
+            <Card title="Pompa Zona 1" value={pumpLabel(pump1Status)} />
+            <Card title="Pompa Zona 2" value={pumpLabel(pump2Status)} />
+            <Card title="Pompa Zona 3" value={pumpLabel(pump3Status)} />
             <Card title="Update Terakhir" value={formatDate(latestData.created_at)} />
             <StatusCard
               title="Status Device"
@@ -451,7 +468,7 @@ function App() {
               />
             </div>
 
-                        <div className="download-panel">
+            <div className="download-panel">
               <h3>Download CSV Berdasarkan Periode</h3>
 
               <div className="date-filter-grid">
@@ -527,6 +544,7 @@ function App() {
                   sensors={zone.sensors}
                   value={zone.value}
                   pump={zone.pump}
+                  pumpSource={zone.pumpSource}
                 />
               ))}
             </div>
@@ -710,9 +728,11 @@ function ControlBox({ title, onTurnOn, onTurnOff }) {
   );
 }
 
-function ZoneCard({ name, sensors, value, pump }) {
+function ZoneCard({ name, sensors, value, pump, pumpSource }) {
   const numberValue = Number(value || 0);
   const status = getSoilStatus(numberValue);
+  const pumpText = pump ? "ON" : "OFF";
+  const isPumpPending = pumpSource === "pending";
 
   return (
     <div className="zone-card">
@@ -723,7 +743,8 @@ function ZoneCard({ name, sensors, value, pump }) {
         </div>
 
         <span className={`status ${pump ? "done" : "pending"}`}>
-          Pump {pump ? "ON" : "OFF"}
+          Pump {pumpText}
+          {isPumpPending ? "..." : ""}
         </span>
       </div>
 
@@ -1001,6 +1022,66 @@ function getDeviceStatus(data) {
     label: "Offline",
     status: "offline",
   };
+}
+
+function getPumpDisplayStatus(latestData, commands, pumpNumber) {
+  const telemetryValue = getPumpTelemetryValue(latestData, pumpNumber);
+  const commandName = `pump_${pumpNumber}`;
+
+  const latestCommand = commands.find(
+    (command) =>
+      command.command === commandName &&
+      ["pending", "done"].includes(command.status)
+  );
+
+  if (!latestCommand) {
+    return {
+      value: telemetryValue,
+      source: "telemetry",
+    };
+  }
+
+  const commandValue = toBooleanValue(latestCommand.value);
+
+  return {
+    value: commandValue,
+    source: latestCommand.status,
+  };
+}
+
+function getPumpTelemetryValue(latestData, pumpNumber) {
+  if (!latestData) return false;
+
+  const directValue = latestData[`pump_${pumpNumber}`];
+
+  if (directValue !== null && directValue !== undefined) {
+    return toBooleanValue(directValue);
+  }
+
+  const statusValue = latestData[`pump_z${pumpNumber}_status`];
+
+  return toBooleanValue(statusValue);
+}
+
+function pumpLabel(pumpStatus) {
+  const label = pumpStatus?.value ? "ON" : "OFF";
+
+  if (pumpStatus?.source === "pending") {
+    return `${label}...`;
+  }
+
+  return label;
+}
+
+function toBooleanValue(value) {
+  if (value === true) return true;
+  if (value === false) return false;
+  if (value === 1) return true;
+  if (value === 0) return false;
+
+  const text = String(value ?? "").trim().toLowerCase();
+
+  return text === "true" || text === "on" || text === "1";
 }
 
 export default App;
