@@ -161,6 +161,21 @@ function App() {
     });
   }
 
+  async function resetSystem() {
+    const confirmed = window.confirm(
+      "Reset ESP8266 dan Arduino Mega sekarang? Sistem akan terputus beberapa detik."
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    await sendCommand("reset_system", true, {
+      action: "RESET_ESP_AND_MEGA",
+      note: "Soft reset requested from web dashboard",
+    });
+  }
+
   function setCsvPresetHours(hours) {
     const end = new Date();
     const start = new Date(end.getTime() - hours * 60 * 60 * 1000);
@@ -232,40 +247,33 @@ function App() {
       "device_id",
       "temperature",
       "humidity",
-
       "soil_a0",
       "soil_a1",
       "soil_a2",
       "soil_a3",
       "soil_a4",
       "soil_a5",
-
       "soil_z1_s1",
       "soil_z1_s2",
       "soil_z2_s1",
       "soil_z2_s2",
       "soil_z3_s1",
       "soil_z3_s2",
-
       "soil_z1_avg",
       "soil_z2_avg",
       "soil_z3_avg",
-
       "raw_a0",
       "raw_a1",
       "raw_a2",
       "raw_a3",
       "raw_a4",
       "raw_a5",
-
       "pump_1",
       "pump_2",
       "pump_3",
-
       "pump_z1_status",
       "pump_z2_status",
       "pump_z3_status",
-
       "rtc_hour",
       "rtc_minute",
       "rtc_second",
@@ -349,17 +357,14 @@ function App() {
 
   const chartData = [...history].reverse().map((row) => ({
     time: formatTime(row.created_at),
-
     temperature: toChartNumber(row.temperature),
     humidity: toChartNumber(row.humidity),
-
     A0: toChartNumber(row.soil_a0),
     A1: toChartNumber(row.soil_a1),
     A2: toChartNumber(row.soil_a2),
     A3: toChartNumber(row.soil_a3),
     A4: toChartNumber(row.soil_a4),
     A5: toChartNumber(row.soil_a5),
-
     zona1: average([row.soil_a0, row.soil_a1]),
     zona2: average([row.soil_a2, row.soil_a3]),
     zona3: average([row.soil_a4, row.soil_a5]),
@@ -405,7 +410,7 @@ function App() {
           <h1>Growth Monitoring Dashboard</h1>
           <p className="subtitle">
             Monitoring sensor, grafik realtime, status pompa, command kontrol,
-            download data, dan request capture CCTV.
+            download data, reset system, dan request capture CCTV.
           </p>
         </div>
 
@@ -524,6 +529,10 @@ function App() {
 
             <div className="action-row">
               <button onClick={requestCameraCapture}>Capture CCTV Zone 1</button>
+
+              <button className="danger" onClick={resetSystem}>
+                Reset ESP + Mega
+              </button>
             </div>
 
             <p className="note">
@@ -1031,7 +1040,7 @@ function getPumpDisplayStatus(latestData, commands, pumpNumber) {
   const latestCommand = commands.find(
     (command) =>
       command.command === commandName &&
-      ["pending", "done"].includes(command.status)
+      ["pending", "processing", "done"].includes(command.status)
   );
 
   if (!latestCommand) {
@@ -1066,7 +1075,7 @@ function getPumpTelemetryValue(latestData, pumpNumber) {
 function pumpLabel(pumpStatus) {
   const label = pumpStatus?.value ? "ON" : "OFF";
 
-  if (pumpStatus?.source === "pending") {
+  if (pumpStatus?.source === "pending" || pumpStatus?.source === "processing") {
     return `${label}...`;
   }
 

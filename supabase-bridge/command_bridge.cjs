@@ -179,33 +179,52 @@ async function updateCommand(id, status, response) {
   }
 }
 
-async function handlePumpCommand(commandRow) {
+async function handleDeviceCommand(commandRow) {
   if (BRIDGE_MODE === "THINGSBOARD") {
     await sendThingsBoardRpc(commandRow.command, commandRow.value, {
       source: "supabase-dashboard",
       command_id: commandRow.id,
     });
 
+    const actionLabel =
+      commandRow.command === "reset_system"
+        ? "RESET ESP + MEGA"
+        : commandRow.value
+          ? "ON"
+          : "OFF";
+
     await updateCommand(
       commandRow.id,
       "done",
-      `THINGSBOARD: RPC ${commandRow.command} = ${
-        commandRow.value ? "ON" : "OFF"
-      } berhasil dikirim.`
+      `THINGSBOARD: RPC ${commandRow.command} = ${actionLabel} berhasil dikirim.`
     );
 
     return;
   }
 
-  await insertPumpStatus(commandRow.command, commandRow.value);
+  if (["pump_1", "pump_2", "pump_3"].includes(commandRow.command)) {
+    await insertPumpStatus(commandRow.command, commandRow.value);
 
-  await updateCommand(
-    commandRow.id,
-    "done",
-    `SIMULATION: ${commandRow.command} = ${
-      commandRow.value ? "ON" : "OFF"
-    }`
-  );
+    await updateCommand(
+      commandRow.id,
+      "done",
+      `SIMULATION: ${commandRow.command} = ${
+        commandRow.value ? "ON" : "OFF"
+      }`
+    );
+
+    return;
+  }
+
+  if (commandRow.command === "reset_system") {
+    await updateCommand(
+      commandRow.id,
+      "done",
+      "SIMULATION: reset_system diterima bridge."
+    );
+
+    return;
+  }
 }
 
 async function processCommand(commandRow) {
@@ -219,8 +238,8 @@ async function processCommand(commandRow) {
   );
 
   try {
-    if (["pump_1", "pump_2", "pump_3"].includes(commandRow.command)) {
-      await handlePumpCommand(commandRow);
+    if (["pump_1", "pump_2", "pump_3", "reset_system"].includes(commandRow.command)) {
+      await handleDeviceCommand(commandRow);
       console.log("Selesai:", commandRow.command);
       return;
     }
