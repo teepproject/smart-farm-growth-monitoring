@@ -597,6 +597,11 @@ function App() {
           </section>
 
           <section className="panel">
+            <h2>ESP32-CAM Realtime</h2>
+            <Esp32CamPanel />
+          </section>
+
+          <section className="panel">
             <h2>Riwayat Data Terbaru</h2>
 
             <div className="table-wrapper">
@@ -903,6 +908,51 @@ function CctvRealtimePanel() {
         </p>
         <p>Source:</p>
         <code>{CCTV_URL}</code>
+      </div>
+    </div>
+  );
+}
+
+function Esp32CamPanel() {
+  const ESP32_CAM_URL = import.meta.env.VITE_ESP32_CAM_URL || "";
+  const [refreshKey, setRefreshKey] = useState(Date.now());
+
+  useEffect(() => {
+    if (!ESP32_CAM_URL) return;
+
+    const interval = setInterval(() => {
+      setRefreshKey(Date.now());
+    }, 1500);
+
+    return () => clearInterval(interval);
+  }, [ESP32_CAM_URL]);
+
+  if (!ESP32_CAM_URL) {
+    return (
+      <div className="cctv-placeholder">
+        <h3>ESP32-CAM belum disambungkan</h3>
+        <p>
+          Masukkan URL ESP32-CAM ke file .env dengan nama VITE_ESP32_CAM_URL.
+        </p>
+      </div>
+    );
+  }
+
+  const imageUrl = `${ESP32_CAM_URL}?t=${refreshKey}`;
+
+  return (
+    <div className="cctv-live-layout">
+      <div className="cctv-wrapper">
+        <img src={imageUrl} alt="ESP32-CAM Realtime" />
+      </div>
+
+      <div className="cctv-info">
+        <h3>ESP32-CAM Additional Camera</h3>
+        <p>
+          Status: <b>Connected</b>
+        </p>
+        <p>Source:</p>
+        <code>{ESP32_CAM_URL}</code>
       </div>
     </div>
   );
