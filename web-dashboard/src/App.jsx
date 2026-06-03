@@ -956,7 +956,10 @@ function Esp32CamPanel() {
     );
   }
 
-  const imageUrl = `${ESP32_CAM_URL}?t=${refreshKey}`;
+  const isPublicWebsite = window.location.hostname.includes("vercel.app");
+  const imageUrl = isPublicWebsite
+    ? `/api/esp32cam?t=${refreshKey}`
+    : `${ESP32_CAM_URL}?t=${refreshKey}`;
 
   return (
     <div className="cctv-live-layout">
