@@ -644,12 +644,12 @@ function App() {
                       <td>{formatDate(row.created_at)}</td>
                       <td>{showValue(row.temperature)} °C</td>
                       <td>{showValue(row.humidity)} %</td>
-                      <td>{showValue(row.soil_a0)}%</td>
-                      <td>{showValue(row.soil_a1)}%</td>
-                      <td>{showValue(row.soil_a2)}%</td>
-                      <td>{showValue(row.soil_a3)}%</td>
-                      <td>{showValue(row.soil_a4)}%</td>
-                      <td>{showValue(row.soil_a5)}%</td>
+                      <td>{showValue(row.soil_z1_s1)}%</td>
+                      <td>{showValue(row.soil_z1_s2)}%</td>
+                      <td>{showValue(row.soil_z2_s1)}%</td>
+                      <td>{showValue(row.soil_z2_s2)}%</td>
+                      <td>{showValue(row.soil_z3_s1)}%</td>
+                      <td>{showValue(row.soil_z3_s2)}%</td>
                     </tr>
                   ))}
                 </tbody>
