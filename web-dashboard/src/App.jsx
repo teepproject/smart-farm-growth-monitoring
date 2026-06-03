@@ -955,9 +955,10 @@ function Esp32CamPanel() {
       </div>
     );
   }
+  
+  const isVercelWebsite = window.location.hostname.includes("vercel.app");
 
-  const isPublicWebsite = window.location.hostname.includes("vercel.app");
-  const imageUrl = isPublicWebsite
+  const imageUrl = isVercelWebsite
     ? `/api/esp32cam?t=${refreshKey}`
     : `${ESP32_CAM_URL}?t=${refreshKey}`;
 
