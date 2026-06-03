@@ -350,12 +350,12 @@ function App() {
   }, []);
 
   const soilSensors = [
-    { name: "A0", key: "soil_a0" },
-    { name: "A1", key: "soil_a1" },
-    { name: "A2", key: "soil_a2" },
-    { name: "A3", key: "soil_a3" },
-    { name: "A4", key: "soil_a4" },
-    { name: "A5", key: "soil_a5" },
+  { name: "A0", key: "soil_z1_s1" },
+  { name: "A1", key: "soil_z1_s2" },
+  { name: "A2", key: "soil_z2_s1" },
+  { name: "A3", key: "soil_z2_s2" },
+  { name: "A4", key: "soil_z3_s1" },
+  { name: "A5", key: "soil_z3_s2" },
   ];
 
   const realtimeRows = [...history]
@@ -371,19 +371,21 @@ function App() {
   .reverse();
 
   const chartData = realtimeRows.map((row) => ({
-    time: formatTime(row.created_at),
-    temperature: toChartNumber(row.temperature),
-    humidity: toChartNumber(row.humidity),
-    A0: toChartNumber(row.soil_a0),
-    A1: toChartNumber(row.soil_a1),
-    A2: toChartNumber(row.soil_a2),
-    A3: toChartNumber(row.soil_a3),
-    A4: toChartNumber(row.soil_a4),
-    A5: toChartNumber(row.soil_a5),
-    zona1: average([row.soil_a0, row.soil_a1]),
-    zona2: average([row.soil_a2, row.soil_a3]),
-    zona3: average([row.soil_a4, row.soil_a5]),
-  }));
+  time: formatTime(row.created_at),
+  temperature: toChartNumber(row.temperature),
+  humidity: toChartNumber(row.humidity),
+
+  A0: toChartNumber(row.soil_z1_s1),
+  A1: toChartNumber(row.soil_z1_s2),
+  A2: toChartNumber(row.soil_z2_s1),
+  A3: toChartNumber(row.soil_z2_s2),
+  A4: toChartNumber(row.soil_z3_s1),
+  A5: toChartNumber(row.soil_z3_s2),
+
+  zona1: average([row.soil_z1_s1, row.soil_z1_s2]),
+  zona2: average([row.soil_z2_s1, row.soil_z2_s2]),
+  zona3: average([row.soil_z3_s1, row.soil_z3_s2]),
+}));
 
   const deviceStatus = getDeviceStatus(latestData);
 
@@ -391,31 +393,32 @@ function App() {
   const pump2Status = getPumpDisplayStatus(latestData, commands, 2);
   const pump3Status = getPumpDisplayStatus(latestData, commands, 3);
 
+
   const zoneSummaries = latestData
-    ? [
-        {
-          name: "Zona 1",
-          sensors: "A0 + A1",
-          value: average([latestData.soil_a0, latestData.soil_a1]),
-          pump: pump1Status.value,
-          pumpSource: pump1Status.source,
-        },
-        {
-          name: "Zona 2",
-          sensors: "A2 + A3",
-          value: average([latestData.soil_a2, latestData.soil_a3]),
-          pump: pump2Status.value,
-          pumpSource: pump2Status.source,
-        },
-        {
-          name: "Zona 3",
-          sensors: "A4 + A5",
-          value: average([latestData.soil_a4, latestData.soil_a5]),
-          pump: pump3Status.value,
-          pumpSource: pump3Status.source,
-        },
-      ]
-    : [];
+  ? [
+      {
+        name: "Zona 1",
+        sensors: "A0 + A1",
+        value: average([latestData.soil_z1_s1, latestData.soil_z1_s2]),
+        pump: pump1Status.value,
+        pumpSource: pump1Status.source,
+      },
+      {
+        name: "Zona 2",
+        sensors: "A2 + A3",
+        value: average([latestData.soil_z2_s1, latestData.soil_z2_s2]),
+        pump: pump2Status.value,
+        pumpSource: pump2Status.source,
+      },
+      {
+        name: "Zona 3",
+        sensors: "A4 + A5",
+        value: average([latestData.soil_z3_s1, latestData.soil_z3_s2]),
+        pump: pump3Status.value,
+        pumpSource: pump3Status.source,
+      },
+    ]
+  : [];  
 
   return (
     <main className="dashboard">
