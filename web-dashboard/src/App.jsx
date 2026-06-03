@@ -179,6 +179,44 @@ function App() {
     });
   }
 
+  async function captureEsp32CamToSupabase() {
+    setActionMessage("Mengambil foto ESP32-CAM dan menyimpan ke Supabase...");
+
+    try {
+      const response = await fetch("/api/esp32cam-capture-upload", {
+        method: "POST",
+      });
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || "Gagal menyimpan foto ESP32-CAM.");
+      }
+
+      setActionMessage(
+        `Foto ESP32-CAM berhasil disimpan ke Supabase. Waktu: ${formatDate(
+          result.capture?.captured_at
+        )}`
+      );
+    } catch (error) {
+      setActionMessage(error.message || "Gagal menyimpan foto ESP32-CAM.");
+    }
+  }
+
+  function downloadEsp32CamCSV() {
+    const params = new URLSearchParams();
+
+    if (csvStartDate) {
+      params.set("start", new Date(csvStartDate).toISOString());
+    }
+
+    if (csvEndDate) {
+      params.set("end", new Date(csvEndDate).toISOString());
+    }
+
+    window.open(`/api/esp32cam-captures-csv?${params.toString()}`, "_blank");
+  }
+
   function setCsvPresetHours(hours) {
     const end = new Date();
     const start = new Date(end.getTime() - hours * 60 * 60 * 1000);
@@ -548,11 +586,19 @@ function App() {
             <div className="action-row">
               <button onClick={requestCameraCapture}>Capture CCTV Zone 1</button>
 
+              <button onClick={captureEsp32CamToSupabase}>
+                Capture ESP32-CAM ke Supabase
+              </button>
+
+              <button onClick={downloadEsp32CamCSV}>
+                Download CSV ESP32-CAM
+              </button>
+
               <button className="danger" onClick={resetSystem}>
                 Reset ESP + Mega
               </button>
             </div>
-
+            
             <p className="note">
               Tombol kontrol membuat command dengan status <b>pending</b> di
               Supabase. Command dibaca oleh bridge lalu diteruskan ke

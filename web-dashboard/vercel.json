@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/esp32cam-capture-upload",
+      "schedule": "0 * * * *"
+    }
+  ]
+}

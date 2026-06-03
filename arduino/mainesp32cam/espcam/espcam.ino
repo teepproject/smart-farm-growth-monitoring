@@ -1,122 +1,359 @@
 #include "esp_camera.h"
 #include "img_converters.h"
 #include <WiFi.h>
-#include <WebServer.h>
+#include "esp_http_server.h"
+#include <time.h>
 
-// =======================
-// WIFI
-// =======================
-// Ganti kalau nama/password WiFi berbeda
-const char* ssid = "qwertyuiop";
-const char* password = "00000000";
+// =====================================================
+// WIFI CONFIGURATION
+// =====================================================
+const char* WIFI_SSID = "qwertyuiop";
+const char* WIFI_PASSWORD = "00000000";
 
-// =======================
-// PIN ESP32-CAM AI THINKER / ESP32 WROVER CAMERA
-// =======================
-#define PWDN_GPIO_NUM     32
-#define RESET_GPIO_NUM    -1
-#define XCLK_GPIO_NUM      0
-#define SIOD_GPIO_NUM     26
-#define SIOC_GPIO_NUM     27
+// =====================================================
+// WORK MODE CONFIGURATION
+// =====================================================
+// false = kamera tetap bisa tampil di website, tapi auto capture dan auto flash belum berjalan
+// true  = kamera mulai kerja: foto tiap 1 jam + flash otomatis ON 19:00 sampai 06:00
+const bool DEFAULT_WORK_MODE_ENABLED = false;
 
-#define Y9_GPIO_NUM       35
-#define Y8_GPIO_NUM       34
-#define Y7_GPIO_NUM       39
-#define Y6_GPIO_NUM       36
-#define Y5_GPIO_NUM       21
-#define Y4_GPIO_NUM       19
-#define Y3_GPIO_NUM       18
-#define Y2_GPIO_NUM        5
+// =====================================================
+// TIME CONFIGURATION
+// =====================================================
+// Taiwan UTC+8. Kalau pakai WIB Indonesia, ubah menjadi 7 * 3600.
+const long GMT_OFFSET_SECONDS = 8 * 3600;
+const int DAYLIGHT_OFFSET_SECONDS = 0;
 
-#define VSYNC_GPIO_NUM    25
-#define HREF_GPIO_NUM     23
-#define PCLK_GPIO_NUM     22
+const char* NTP_SERVER_1 = "pool.ntp.org";
+const char* NTP_SERVER_2 = "time.google.com";
 
-#define FLASH_LED_PIN      4
+// =====================================================
+// AUTO CAPTURE + FLASH CONFIGURATION
+// =====================================================
+const int FLASH_ON_HOUR = 19;   // 7 PM
+const int FLASH_OFF_HOUR = 6;   // 6 AM
 
-WebServer server(80);
+// Manual flash dari website berlaku 10 menit,
+// lalu kembali ke auto schedule kalau work mode true.
+const unsigned long MANUAL_FLASH_DURATION_MS = 10UL * 60UL * 1000UL;
 
-// =======================
-// HALAMAN WEB
-// =======================
-void handleRoot() {
-  String html = R"rawliteral(
-  <!DOCTYPE html>
-  <html>
-  <head>
-    <title>ESP32-CAM RGB565 Test</title>
-    <style>
-      body {
-        background: #111;
-        color: white;
-        font-family: Arial;
-        text-align: center;
-        margin: 0;
-        padding: 20px;
-      }
+// =====================================================
+// AI THINKER ESP32-CAM PIN CONFIGURATION
+// =====================================================
+#define PWDN_GPIO_NUM      32
+#define RESET_GPIO_NUM     -1
+#define XCLK_GPIO_NUM       0
+#define SIOD_GPIO_NUM      26
+#define SIOC_GPIO_NUM      27
 
-      h2 {
-        margin-bottom: 8px;
-      }
+#define Y9_GPIO_NUM        35
+#define Y8_GPIO_NUM        34
+#define Y7_GPIO_NUM        39
+#define Y6_GPIO_NUM        36
+#define Y5_GPIO_NUM        21
+#define Y4_GPIO_NUM        19
+#define Y3_GPIO_NUM        18
+#define Y2_GPIO_NUM         5
 
-      p {
-        margin-top: 0;
-        color: #cccccc;
-      }
+#define VSYNC_GPIO_NUM     25
+#define HREF_GPIO_NUM      23
+#define PCLK_GPIO_NUM      22
 
-      img {
-        width: 320px;
-        max-width: 90%;
-        border: 3px solid white;
-        border-radius: 10px;
-      }
+#define FLASH_LED_PIN       4
 
-      button {
-        padding: 12px 20px;
-        margin: 8px;
-        font-size: 16px;
-        cursor: pointer;
-      }
-    </style>
-  </head>
+// =====================================================
+// CAMERA SETTINGS
+// =====================================================
+// Sensor kamu sebelumnya tidak support JPEG langsung,
+// jadi pakai RGB565 lalu convert ke JPG.
+#define CAMERA_FRAME_SIZE FRAMESIZE_QQVGA   // 160x120, paling stabil
+#define CAMERA_JPG_QUALITY 15               // 10 bagus, 15 lebih ringan
 
-  <body>
-    <h2>ESP32-CAM Test</h2>
-    <p>Mode: RGB565 lalu convert ke JPG</p>
+httpd_handle_t cameraServer = NULL;
 
-    <img id="cam" src="/jpg">
+// =====================================================
+// GLOBAL STATE
+// =====================================================
+bool workModeEnabled = DEFAULT_WORK_MODE_ENABLED;
+
+uint8_t* latestPhotoBuffer = NULL;
+size_t latestPhotoLength = 0;
+String latestPhotoTime = "-";
+
+int lastCaptureYear = -1;
+int lastCaptureYDay = -1;
+int lastCaptureHour = -1;
+
+bool flashState = false;
+bool manualFlashOverride = false;
+bool manualFlashState = false;
+unsigned long manualFlashUntil = 0;
+
+unsigned long lastTimePrint = 0;
+
+// =====================================================
+// HTML PAGE
+// =====================================================
+static const char MAIN_PAGE[] PROGMEM = R"rawliteral(
+<!DOCTYPE html>
+<html>
+<head>
+  <title>ESP32-CAM Smart Farm</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <style>
+    body {
+      background: #111827;
+      color: white;
+      font-family: Arial, sans-serif;
+      text-align: center;
+      margin: 0;
+      padding: 20px;
+    }
+
+    img {
+      width: 320px;
+      max-width: 95%;
+      border: 3px solid white;
+      border-radius: 12px;
+      background: black;
+    }
+
+    button, a {
+      margin: 8px;
+      padding: 10px 16px;
+      border-radius: 8px;
+      border: none;
+      background: #22c55e;
+      color: #020617;
+      font-weight: bold;
+      text-decoration: none;
+      cursor: pointer;
+      display: inline-block;
+    }
+
+    .danger {
+      background: #ef4444;
+      color: white;
+    }
+
+    .secondary {
+      background: #38bdf8;
+      color: #020617;
+    }
+
+    .warning {
+      background: #facc15;
+      color: #020617;
+    }
+
+    code {
+      display: block;
+      margin: 15px auto;
+      padding: 10px;
+      background: #020617;
+      color: #86efac;
+      border-radius: 8px;
+      max-width: 760px;
+      word-break: break-all;
+    }
+
+    .box {
+      max-width: 820px;
+      margin: 0 auto 20px;
+      padding: 16px;
+      border: 1px solid #334155;
+      border-radius: 16px;
+      background: #020617;
+    }
+
+    .small {
+      color: #cbd5e1;
+      font-size: 14px;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>ESP32-CAM Smart Farm</h1>
+  <p>Live camera always works. Auto hourly capture and night flash depend on work mode.</p>
+
+  <div class="box">
+    <h2>Live JPG Preview</h2>
+    <img id="cam" src="/jpg" alt="ESP32-CAM">
 
     <br><br>
 
-    <button onclick="location.href='/flash/on'">Flash ON</button>
-    <button onclick="location.href='/flash/off'">Flash OFF</button>
+    <button onclick="refreshImage()">Refresh</button>
+    <a href="/jpg" target="_blank">Open Live JPG</a>
+    <a href="/latest.jpg" target="_blank">Open Latest Hourly Photo</a>
+    <a href="/status" target="_blank">Status</a>
 
-    <script>
-      setInterval(() => {
-        document.getElementById("cam").src = "/jpg?t=" + new Date().getTime();
-      }, 1500);
-    </script>
-  </body>
-  </html>
-  )rawliteral";
+    <p class="small">Live image refresh every 5 seconds.</p>
+  </div>
 
-  server.send(200, "text/html", html);
+  <div class="box">
+    <h2>Work Mode</h2>
+    <p>
+      Work Mode ON = foto otomatis tiap jam + flash ON jam 19:00 sampai 06:00.
+    </p>
+
+    <button onclick="fetch('/work/on').then(() => alert('Work Mode ON'))">
+      Work Mode ON
+    </button>
+
+    <button class="danger" onclick="fetch('/work/off').then(() => alert('Work Mode OFF'))">
+      Work Mode OFF
+    </button>
+
+    <button class="secondary" onclick="fetch('/capture').then(() => alert('Manual capture saved'))">
+      Capture Now
+    </button>
+  </div>
+
+  <div class="box">
+    <h2>Flash Control</h2>
+
+    <button onclick="fetch('/flash/on').then(() => alert('Flash ON'))">
+      Flash ON
+    </button>
+
+    <button class="danger" onclick="fetch('/flash/off').then(() => alert('Flash OFF'))">
+      Flash OFF
+    </button>
+
+    <button class="warning" onclick="fetch('/flash/auto').then(() => alert('Flash AUTO'))">
+      Flash AUTO
+    </button>
+
+    <p class="small">
+      Manual flash berlaku 10 menit, lalu kembali auto kalau Work Mode ON.
+    </p>
+  </div>
+
+  <div class="box">
+    <h2>Camera URLs</h2>
+
+    <p>Live dashboard URL:</p>
+    <code id="jpgUrl"></code>
+
+    <p>Latest hourly photo URL:</p>
+    <code id="latestUrl"></code>
+
+    <p>Status URL:</p>
+    <code id="statusUrl"></code>
+  </div>
+
+  <script>
+    function refreshImage() {
+      document.getElementById("cam").src = "/jpg?t=" + Date.now();
+    }
+
+    setInterval(refreshImage, 5000);
+
+    document.getElementById("jpgUrl").textContent =
+      window.location.origin + "/jpg";
+
+    document.getElementById("latestUrl").textContent =
+      window.location.origin + "/latest.jpg";
+
+    document.getElementById("statusUrl").textContent =
+      window.location.origin + "/status";
+  </script>
+</body>
+</html>
+)rawliteral";
+
+// =====================================================
+// TIME HELPER
+// =====================================================
+bool getCurrentTime(struct tm* timeInfo) {
+  return getLocalTime(timeInfo, 1000);
 }
 
-// =======================
-// AMBIL GAMBAR
-// =======================
-void handleJpg() {
-  camera_fb_t *fb = esp_camera_fb_get();
+String formatTimeString(const struct tm& timeInfo) {
+  char buffer[32];
 
-  if (!fb) {
-    Serial.println("Gagal ambil gambar");
-    server.send(500, "text/plain", "Camera capture failed");
+  strftime(
+    buffer,
+    sizeof(buffer),
+    "%Y-%m-%d %H:%M:%S",
+    &timeInfo
+  );
+
+  return String(buffer);
+}
+
+bool isFlashScheduleActive(const struct tm& timeInfo) {
+  int hour = timeInfo.tm_hour;
+
+  // Flash ON dari 19:00 sampai 05:59
+  // Flash OFF dari 06:00 sampai 18:59
+  return hour >= FLASH_ON_HOUR || hour < FLASH_OFF_HOUR;
+}
+
+// =====================================================
+// FLASH CONTROL
+// =====================================================
+void applyFlashState(bool state) {
+  flashState = state;
+  digitalWrite(FLASH_LED_PIN, state ? HIGH : LOW);
+}
+
+void updateFlashSchedule() {
+  // Kalau work mode false, auto flash tidak berjalan.
+  // Flash juga dipaksa OFF agar aman.
+  if (!workModeEnabled) {
+    if (flashState) {
+      applyFlashState(false);
+      Serial.println("[FLASH] Work mode OFF. Flash forced OFF.");
+    }
     return;
   }
 
-  uint8_t *jpg_buf = NULL;
-  size_t jpg_len = 0;
+  // Manual override dari website.
+  if (manualFlashOverride) {
+    if (millis() < manualFlashUntil) {
+      applyFlashState(manualFlashState);
+      return;
+    }
+
+    manualFlashOverride = false;
+    Serial.println("[FLASH] Manual override expired. Back to auto schedule.");
+  }
+
+  struct tm timeInfo;
+
+  if (!getCurrentTime(&timeInfo)) {
+    return;
+  }
+
+  bool shouldBeOn = isFlashScheduleActive(timeInfo);
+
+  if (shouldBeOn != flashState) {
+    applyFlashState(shouldBeOn);
+
+    Serial.print("[FLASH] Auto schedule changed. Flash: ");
+    Serial.println(shouldBeOn ? "ON" : "OFF");
+  }
+}
+
+// =====================================================
+// CAMERA CAPTURE TO JPG BUFFER
+// =====================================================
+bool captureJpgToBuffer(uint8_t** outBuffer, size_t* outLength) {
+  *outBuffer = NULL;
+  *outLength = 0;
+
+  camera_fb_t* fb = esp_camera_fb_get();
+
+  if (!fb) {
+    Serial.println("[ERROR] Camera capture failed");
+    return false;
+  }
+
+  uint8_t* jpgBuffer = NULL;
+  size_t jpgLength = 0;
 
   bool converted = fmt2jpg(
     fb->buf,
@@ -124,56 +361,324 @@ void handleJpg() {
     fb->width,
     fb->height,
     fb->format,
-    80,
-    &jpg_buf,
-    &jpg_len
+    CAMERA_JPG_QUALITY,
+    &jpgBuffer,
+    &jpgLength
   );
 
   esp_camera_fb_return(fb);
 
-  if (!converted) {
-    Serial.println("Gagal convert RGB565 ke JPG");
-    server.send(500, "text/plain", "JPG conversion failed");
+  if (!converted || jpgBuffer == NULL || jpgLength == 0) {
+    Serial.println("[ERROR] RGB565 to JPG conversion failed");
+
+    if (jpgBuffer != NULL) {
+      free(jpgBuffer);
+    }
+
+    return false;
+  }
+
+  *outBuffer = jpgBuffer;
+  *outLength = jpgLength;
+
+  return true;
+}
+
+// =====================================================
+// HOURLY PHOTO CAPTURE
+// =====================================================
+bool captureHourlyPhoto(const String& reason) {
+  Serial.print("[CAPTURE] Taking photo. Reason: ");
+  Serial.println(reason);
+
+  uint8_t* newBuffer = NULL;
+  size_t newLength = 0;
+
+  bool ok = captureJpgToBuffer(&newBuffer, &newLength);
+
+  if (!ok) {
+    Serial.println("[CAPTURE] Failed.");
+    return false;
+  }
+
+  if (latestPhotoBuffer != NULL) {
+    free(latestPhotoBuffer);
+    latestPhotoBuffer = NULL;
+    latestPhotoLength = 0;
+  }
+
+  latestPhotoBuffer = newBuffer;
+  latestPhotoLength = newLength;
+
+  struct tm timeInfo;
+
+  if (getCurrentTime(&timeInfo)) {
+    latestPhotoTime = formatTimeString(timeInfo);
+  } else {
+    latestPhotoTime = "time-not-synced";
+  }
+
+  Serial.print("[CAPTURE] Saved latest photo. Size: ");
+  Serial.print(latestPhotoLength);
+  Serial.print(" bytes. Time: ");
+  Serial.println(latestPhotoTime);
+
+  return true;
+}
+
+void checkHourlyCapture() {
+  // Kalau work mode false, auto capture tidak berjalan.
+  if (!workModeEnabled) {
     return;
   }
 
-  server.sendHeader("Access-Control-Allow-Origin", "*");
-  server.send_P(200, "image/jpeg", (const char *)jpg_buf, jpg_len);
+  struct tm timeInfo;
 
-  free(jpg_buf);
+  if (!getCurrentTime(&timeInfo)) {
+    return;
+  }
+
+  // Foto sekali setiap masuk jam baru.
+  bool isNewHour =
+    timeInfo.tm_year != lastCaptureYear ||
+    timeInfo.tm_yday != lastCaptureYDay ||
+    timeInfo.tm_hour != lastCaptureHour;
+
+  if (!isNewHour) {
+    return;
+  }
+
+  bool ok = captureHourlyPhoto("new-hour-auto");
+
+  if (ok) {
+    lastCaptureYear = timeInfo.tm_year;
+    lastCaptureYDay = timeInfo.tm_yday;
+    lastCaptureHour = timeInfo.tm_hour;
+  }
 }
 
-// =======================
-// FLASH ON
-// =======================
-void handleFlashOn() {
-  digitalWrite(FLASH_LED_PIN, HIGH);
-  server.sendHeader("Location", "/");
-  server.send(303);
+// =====================================================
+// HTTP HANDLERS
+// =====================================================
+static esp_err_t rootHandler(httpd_req_t* req) {
+  httpd_resp_set_type(req, "text/html");
+  httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+  return httpd_resp_send(req, MAIN_PAGE, strlen(MAIN_PAGE));
 }
 
-// =======================
-// FLASH OFF
-// =======================
-void handleFlashOff() {
-  digitalWrite(FLASH_LED_PIN, LOW);
-  server.sendHeader("Location", "/");
-  server.send(303);
+static esp_err_t jpgHandler(httpd_req_t* req) {
+  uint8_t* jpgBuffer = NULL;
+  size_t jpgLength = 0;
+
+  bool ok = captureJpgToBuffer(&jpgBuffer, &jpgLength);
+
+  if (!ok) {
+    httpd_resp_send_500(req);
+    return ESP_FAIL;
+  }
+
+  httpd_resp_set_type(req, "image/jpeg");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_set_hdr(req, "Cache-Control", "no-store, no-cache, must-revalidate");
+  httpd_resp_set_hdr(req, "Pragma", "no-cache");
+  httpd_resp_set_hdr(req, "Expires", "0");
+
+  esp_err_t result = httpd_resp_send(req, (const char*)jpgBuffer, jpgLength);
+
+  free(jpgBuffer);
+
+  return result;
 }
 
-// =======================
-// SETUP
-// =======================
-void setup() {
-  Serial.begin(115200);
-  delay(2000);
+static esp_err_t latestJpgHandler(httpd_req_t* req) {
+  if (latestPhotoBuffer == NULL || latestPhotoLength == 0) {
+    bool ok = captureHourlyPhoto("latest-request-no-photo-yet");
 
-  Serial.println();
-  Serial.println("=== ESP32-CAM RGB565 WIFI TEST ===");
+    if (!ok) {
+      httpd_resp_send_500(req);
+      return ESP_FAIL;
+    }
+  }
 
-  pinMode(FLASH_LED_PIN, OUTPUT);
-  digitalWrite(FLASH_LED_PIN, LOW);
+  httpd_resp_set_type(req, "image/jpeg");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_set_hdr(req, "Cache-Control", "no-store, no-cache, must-revalidate");
 
+  return httpd_resp_send(
+    req,
+    (const char*)latestPhotoBuffer,
+    latestPhotoLength
+  );
+}
+
+static esp_err_t manualCaptureHandler(httpd_req_t* req) {
+  bool ok = captureHourlyPhoto("manual-http-capture");
+
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+
+  if (!ok) {
+    return httpd_resp_send(
+      req,
+      "{\"success\":false,\"message\":\"capture failed\"}",
+      HTTPD_RESP_USE_STRLEN
+    );
+  }
+
+  String json = "{";
+  json += "\"success\":true,";
+  json += "\"message\":\"manual capture saved\",";
+  json += "\"latest_photo_time\":\"";
+  json += latestPhotoTime;
+  json += "\",";
+  json += "\"latest_photo_size\":";
+  json += latestPhotoLength;
+  json += "}";
+
+  return httpd_resp_send(req, json.c_str(), json.length());
+}
+
+static esp_err_t workOnHandler(httpd_req_t* req) {
+  workModeEnabled = true;
+  manualFlashOverride = false;
+  manualFlashUntil = 0;
+
+  updateFlashSchedule();
+
+  // Capture sekali saat work mode dinyalakan.
+  bool ok = captureHourlyPhoto("work-mode-enabled");
+
+  if (ok) {
+    struct tm timeInfo;
+
+    if (getCurrentTime(&timeInfo)) {
+      lastCaptureYear = timeInfo.tm_year;
+      lastCaptureYDay = timeInfo.tm_yday;
+      lastCaptureHour = timeInfo.tm_hour;
+    }
+  }
+
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+
+  return httpd_resp_send(
+    req,
+    "{\"success\":true,\"work_mode\":true,\"message\":\"Work mode enabled\"}",
+    HTTPD_RESP_USE_STRLEN
+  );
+}
+
+static esp_err_t workOffHandler(httpd_req_t* req) {
+  workModeEnabled = false;
+  manualFlashOverride = false;
+  manualFlashUntil = 0;
+
+  applyFlashState(false);
+
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+
+  return httpd_resp_send(
+    req,
+    "{\"success\":true,\"work_mode\":false,\"message\":\"Work mode disabled\"}",
+    HTTPD_RESP_USE_STRLEN
+  );
+}
+
+static esp_err_t statusHandler(httpd_req_t* req) {
+  struct tm timeInfo;
+  String currentTime = "-";
+
+  if (getCurrentTime(&timeInfo)) {
+    currentTime = formatTimeString(timeInfo);
+  }
+
+  String json = "{";
+  json += "\"device\":\"ESP32-CAM Smart Farm\",";
+  json += "\"mode\":\"RGB565_to_JPG\",";
+  json += "\"work_mode_enabled\":";
+  json += (workModeEnabled ? "true" : "false");
+  json += ",";
+  json += "\"wifi\":\"";
+  json += (WiFi.status() == WL_CONNECTED ? "connected" : "disconnected");
+  json += "\",";
+  json += "\"ip\":\"";
+  json += WiFi.localIP().toString();
+  json += "\",";
+  json += "\"rssi\":";
+  json += WiFi.RSSI();
+  json += ",";
+  json += "\"free_heap\":";
+  json += ESP.getFreeHeap();
+  json += ",";
+  json += "\"psram\":";
+  json += (psramFound() ? "true" : "false");
+  json += ",";
+  json += "\"current_time\":\"";
+  json += currentTime;
+  json += "\",";
+  json += "\"flash_state\":\"";
+  json += (flashState ? "on" : "off");
+  json += "\",";
+  json += "\"manual_flash_override\":";
+  json += (manualFlashOverride ? "true" : "false");
+  json += ",";
+  json += "\"latest_photo_time\":\"";
+  json += latestPhotoTime;
+  json += "\",";
+  json += "\"latest_photo_size\":";
+  json += latestPhotoLength;
+  json += "}";
+
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+
+  return httpd_resp_send(req, json.c_str(), json.length());
+}
+
+static esp_err_t flashOnHandler(httpd_req_t* req) {
+  manualFlashOverride = true;
+  manualFlashState = true;
+  manualFlashUntil = millis() + MANUAL_FLASH_DURATION_MS;
+
+  applyFlashState(true);
+
+  httpd_resp_set_type(req, "text/plain");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+
+  return httpd_resp_send(req, "Flash ON manual override", HTTPD_RESP_USE_STRLEN);
+}
+
+static esp_err_t flashOffHandler(httpd_req_t* req) {
+  manualFlashOverride = true;
+  manualFlashState = false;
+  manualFlashUntil = millis() + MANUAL_FLASH_DURATION_MS;
+
+  applyFlashState(false);
+
+  httpd_resp_set_type(req, "text/plain");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+
+  return httpd_resp_send(req, "Flash OFF manual override", HTTPD_RESP_USE_STRLEN);
+}
+
+static esp_err_t flashAutoHandler(httpd_req_t* req) {
+  manualFlashOverride = false;
+  manualFlashUntil = 0;
+
+  updateFlashSchedule();
+
+  httpd_resp_set_type(req, "text/plain");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+
+  return httpd_resp_send(req, "Flash AUTO mode", HTTPD_RESP_USE_STRLEN);
+}
+
+// =====================================================
+// CAMERA SETUP
+// =====================================================
+void setupCamera() {
   camera_config_t config;
 
   config.ledc_channel = LEDC_CHANNEL_0;
@@ -199,65 +704,302 @@ void setup() {
   config.pin_pwdn = PWDN_GPIO_NUM;
   config.pin_reset = RESET_GPIO_NUM;
 
-  config.xclk_freq_hz = 20000000;
-
-  // Sensor kamu tidak support JPEG langsung,
-  // jadi pakai RGB565 lalu dikonversi ke JPG.
+  config.xclk_freq_hz = 10000000;
   config.pixel_format = PIXFORMAT_RGB565;
 
-  // Resolusi dinaikkan dari QQVGA 160x120 ke QVGA 320x240
-  config.frame_size = FRAMESIZE_QVGA;
-
-  config.jpeg_quality = 12;
+  config.frame_size = CAMERA_FRAME_SIZE;
+  config.jpeg_quality = CAMERA_JPG_QUALITY;
   config.fb_count = 1;
+  config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
 
-  Serial.println("Inisialisasi kamera...");
-
-  esp_err_t err = esp_camera_init(&config);
-
-  if (err != ESP_OK) {
-    Serial.printf("KAMERA GAGAL. Error: 0x%x\n", err);
-    Serial.println("Cek kamera, kabel fleksibel, board, dan power.");
-    return;
+  if (psramFound()) {
+    config.fb_location = CAMERA_FB_IN_PSRAM;
+    Serial.println("[INFO] PSRAM found. Using PSRAM framebuffer.");
+  } else {
+    config.fb_location = CAMERA_FB_IN_DRAM;
+    Serial.println("[WARN] PSRAM not found. Using DRAM framebuffer.");
   }
 
-  Serial.println("KAMERA BERHASIL TERDETEKSI!");
+  esp_err_t error = esp_camera_init(&config);
 
-  sensor_t *s = esp_camera_sensor_get();
-
-  if (s != NULL) {
-    Serial.printf("Sensor PID: 0x%04X\n", s->id.PID);
-
-    // Kalau gambar terbalik/mirror, ubah 0 jadi 1
-    s->set_vflip(s, 0);
-    s->set_hmirror(s, 0);
+  if (error != ESP_OK) {
+    Serial.printf("[ERROR] Camera init failed: 0x%x\n", error);
+    Serial.println("[TIPS]");
+    Serial.println("1. Board: AI Thinker ESP32-CAM");
+    Serial.println("2. PSRAM: Enabled");
+    Serial.println("3. Partition Scheme: Huge APP");
+    Serial.println("4. Use stable 5V power supply");
+    delay(3000);
+    ESP.restart();
   }
 
-  WiFi.begin(ssid, password);
-  Serial.print("Menghubungkan ke WiFi");
+  sensor_t* sensor = esp_camera_sensor_get();
+
+  if (sensor) {
+    sensor->set_vflip(sensor, 0);
+    sensor->set_hmirror(sensor, 0);
+    sensor->set_brightness(sensor, 0);
+    sensor->set_contrast(sensor, 0);
+    sensor->set_saturation(sensor, 0);
+    sensor->set_gain_ctrl(sensor, 1);
+    sensor->set_exposure_ctrl(sensor, 1);
+    sensor->set_whitebal(sensor, 1);
+  }
+
+  Serial.println("[OK] Camera initialized in RGB565 mode");
+}
+
+// =====================================================
+// WIFI + TIME
+// =====================================================
+void connectToWiFi() {
+  WiFi.mode(WIFI_STA);
+  WiFi.setSleep(false);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+  Serial.println();
+  Serial.print("[WiFi] Connecting");
+
+  int retry = 0;
 
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
+    retry++;
+
+    if (retry >= 60) {
+      Serial.println();
+      Serial.println("[WiFi] Failed. Restarting...");
+      delay(1000);
+      ESP.restart();
+    }
   }
 
   Serial.println();
-  Serial.println("WiFi terhubung!");
-  Serial.print("Buka di browser: http://");
+  Serial.println("[WiFi] Connected");
+  Serial.print("[WiFi] IP Address: ");
   Serial.println(WiFi.localIP());
-
-  server.on("/", handleRoot);
-  server.on("/jpg", handleJpg);
-  server.on("/flash/on", handleFlashOn);
-  server.on("/flash/off", handleFlashOff);
-
-  server.begin();
-  Serial.println("Web server aktif.");
+  Serial.print("[WiFi] RSSI: ");
+  Serial.println(WiFi.RSSI());
 }
 
-// =======================
+void syncTime() {
+  configTime(
+    GMT_OFFSET_SECONDS,
+    DAYLIGHT_OFFSET_SECONDS,
+    NTP_SERVER_1,
+    NTP_SERVER_2
+  );
+
+  Serial.print("[TIME] Syncing NTP");
+
+  struct tm timeInfo;
+  int retry = 0;
+
+  while (!getCurrentTime(&timeInfo) && retry < 30) {
+    delay(500);
+    Serial.print(".");
+    retry++;
+  }
+
+  Serial.println();
+
+  if (retry >= 30) {
+    Serial.println("[TIME] Failed to sync time. Will retry in loop.");
+    return;
+  }
+
+  Serial.print("[TIME] Synced: ");
+  Serial.println(formatTimeString(timeInfo));
+}
+
+// =====================================================
+// SERVER
+// =====================================================
+void startCameraServer() {
+  httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+  config.server_port = 80;
+  config.max_uri_handlers = 12;
+  config.stack_size = 8192;
+
+  httpd_uri_t rootUri = {
+    .uri = "/",
+    .method = HTTP_GET,
+    .handler = rootHandler,
+    .user_ctx = NULL
+  };
+
+  httpd_uri_t jpgUri = {
+    .uri = "/jpg",
+    .method = HTTP_GET,
+    .handler = jpgHandler,
+    .user_ctx = NULL
+  };
+
+  httpd_uri_t latestJpgUri = {
+    .uri = "/latest.jpg",
+    .method = HTTP_GET,
+    .handler = latestJpgHandler,
+    .user_ctx = NULL
+  };
+
+  httpd_uri_t captureUri = {
+    .uri = "/capture",
+    .method = HTTP_GET,
+    .handler = manualCaptureHandler,
+    .user_ctx = NULL
+  };
+
+  httpd_uri_t workOnUri = {
+    .uri = "/work/on",
+    .method = HTTP_GET,
+    .handler = workOnHandler,
+    .user_ctx = NULL
+  };
+
+  httpd_uri_t workOffUri = {
+    .uri = "/work/off",
+    .method = HTTP_GET,
+    .handler = workOffHandler,
+    .user_ctx = NULL
+  };
+
+  httpd_uri_t statusUri = {
+    .uri = "/status",
+    .method = HTTP_GET,
+    .handler = statusHandler,
+    .user_ctx = NULL
+  };
+
+  httpd_uri_t flashOnUri = {
+    .uri = "/flash/on",
+    .method = HTTP_GET,
+    .handler = flashOnHandler,
+    .user_ctx = NULL
+  };
+
+  httpd_uri_t flashOffUri = {
+    .uri = "/flash/off",
+    .method = HTTP_GET,
+    .handler = flashOffHandler,
+    .user_ctx = NULL
+  };
+
+  httpd_uri_t flashAutoUri = {
+    .uri = "/flash/auto",
+    .method = HTTP_GET,
+    .handler = flashAutoHandler,
+    .user_ctx = NULL
+  };
+
+  if (httpd_start(&cameraServer, &config) == ESP_OK) {
+    httpd_register_uri_handler(cameraServer, &rootUri);
+    httpd_register_uri_handler(cameraServer, &jpgUri);
+    httpd_register_uri_handler(cameraServer, &latestJpgUri);
+    httpd_register_uri_handler(cameraServer, &captureUri);
+    httpd_register_uri_handler(cameraServer, &workOnUri);
+    httpd_register_uri_handler(cameraServer, &workOffUri);
+    httpd_register_uri_handler(cameraServer, &statusUri);
+    httpd_register_uri_handler(cameraServer, &flashOnUri);
+    httpd_register_uri_handler(cameraServer, &flashOffUri);
+    httpd_register_uri_handler(cameraServer, &flashAutoUri);
+
+    Serial.println("[OK] HTTP server started");
+  } else {
+    Serial.println("[ERROR] Failed to start HTTP server");
+  }
+}
+
+// =====================================================
+// SETUP
+// =====================================================
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+
+  pinMode(FLASH_LED_PIN, OUTPUT);
+  applyFlashState(false);
+
+  Serial.println();
+  Serial.println("==========================================");
+  Serial.println("ESP32-CAM SMART FARM WORK MODE");
+  Serial.println("==========================================");
+
+  setupCamera();
+  connectToWiFi();
+  syncTime();
+
+  if (workModeEnabled) {
+    updateFlashSchedule();
+    captureHourlyPhoto("boot-work-mode-enabled");
+  } else {
+    applyFlashState(false);
+    Serial.println("[WORK MODE] OFF at boot. Live image still available.");
+  }
+
+  startCameraServer();
+
+  Serial.println();
+  Serial.println("Open these URLs:");
+  Serial.print("Home        : http://");
+  Serial.println(WiFi.localIP());
+
+  Serial.print("Live JPG    : http://");
+  Serial.print(WiFi.localIP());
+  Serial.println("/jpg");
+
+  Serial.print("Latest Photo: http://");
+  Serial.print(WiFi.localIP());
+  Serial.println("/latest.jpg");
+
+  Serial.print("Work ON     : http://");
+  Serial.print(WiFi.localIP());
+  Serial.println("/work/on");
+
+  Serial.print("Work OFF    : http://");
+  Serial.print(WiFi.localIP());
+  Serial.println("/work/off");
+
+  Serial.print("Status      : http://");
+  Serial.print(WiFi.localIP());
+  Serial.println("/status");
+
+  Serial.println("==========================================");
+}
+
+// =====================================================
 // LOOP
-// =======================
+// =====================================================
 void loop() {
-  server.handleClient();
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("[WiFi] Disconnected. Restarting...");
+    delay(1000);
+    ESP.restart();
+  }
+
+  updateFlashSchedule();
+  checkHourlyCapture();
+
+  if (millis() - lastTimePrint >= 30000) {
+    lastTimePrint = millis();
+
+    struct tm timeInfo;
+
+    Serial.print("[WORK MODE] ");
+    Serial.print(workModeEnabled ? "ON" : "OFF");
+    Serial.print(" | Flash: ");
+    Serial.print(flashState ? "ON" : "OFF");
+    Serial.print(" | Latest photo: ");
+    Serial.print(latestPhotoTime);
+
+    if (getCurrentTime(&timeInfo)) {
+      Serial.print(" | Time: ");
+      Serial.println(formatTimeString(timeInfo));
+    } else {
+      Serial.println(" | Time not synced.");
+      syncTime();
+    }
+  }
+
+  delay(1000);
 }
