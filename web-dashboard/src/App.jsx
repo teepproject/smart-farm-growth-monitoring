@@ -25,6 +25,9 @@ const SENSOR_TABLE = "sensor_readings";
 const COMMAND_TABLE = "device_commands";
 const CAMERA_TABLE = "camera_captures";
 
+const REALTIME_WINDOW_MS = 60 * 1000; // last 1 minute
+const DASHBOARD_POLL_MS = 3000; // refresh every 3 seconds
+
 function App() {
   const [latestData, setLatestData] = useState(null);
   const [history, setHistory] = useState([]);
@@ -74,7 +77,7 @@ function App() {
       .not("soil_a0", "is", null)
       .order("created_at", { ascending: false })
       .order("id", { ascending: false })
-      .limit(60);
+      .limit(120);
 
     if (error) {
       setErrorMessage(error.message);
@@ -338,7 +341,7 @@ function App() {
       )
       .subscribe();
 
-    const interval = setInterval(() => fetchAllData(false), 10000);
+    const interval = setInterval(() => fetchAllData(false), DASHBOARD_POLL_MS);
 
     return () => {
       supabase.removeChannel(channel);
@@ -355,7 +358,19 @@ function App() {
     { name: "A5", key: "soil_a5" },
   ];
 
-  const chartData = [...history].reverse().map((row) => ({
+  const realtimeRows = [...history]
+  .filter((row) => {
+    if (!row.created_at) return false;
+
+    const rowTime = new Date(row.created_at).getTime();
+
+    if (Number.isNaN(rowTime)) return false;
+
+    return Date.now() - rowTime <= REALTIME_WINDOW_MS;
+  })
+  .reverse();
+
+  const chartData = realtimeRows.map((row) => ({
     time: formatTime(row.created_at),
     temperature: toChartNumber(row.temperature),
     humidity: toChartNumber(row.humidity),
@@ -576,7 +591,7 @@ function App() {
           <section className="panel">
             <h2>Grafik Realtime Kelembapan Tanah</h2>
             <p className="note">
-              Menampilkan data 60 pembacaan terbaru dari Supabase.
+              Realtime - last 1 minute from Supabase
             </p>
 
             <SoilRealtimeChart data={chartData} />
@@ -585,7 +600,7 @@ function App() {
           <section className="panel">
             <h2>Grafik Suhu dan Kelembapan Udara</h2>
             <p className="note">
-              Menampilkan perubahan suhu dan kelembapan udara dari DHT22.
+              Realtime - last 1 minute from DHT22
             </p>
 
             <AirRealtimeChart data={chartData} />

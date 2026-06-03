@@ -29,14 +29,14 @@
 // MODE SETTING
 // ==================================================
 
-// false = jadwal asli penyiraman jam 07:00
-// true  = test relay berdasarkan jam RTC
+// false = real irrigation schedule at 07:00
+// true  = relay test based on RTC time
 const bool TEST_MODE = false;
 
-// true = relay test interval:
-// Relay 1 setiap 3 detik
-// Relay 2 setiap 6 detik
-// Relay 3 setiap 9 detik
+// true = relay interval test:
+// Relay 1 every 3 seconds
+// Relay 2 every 6 seconds
+// Relay 3 every 9 seconds
 const bool RELAY_INTERVAL_TEST_MODE = false;
 
 // ==================================================
@@ -45,12 +45,12 @@ const bool RELAY_INTERVAL_TEST_MODE = false;
 
 RTC_DS3231 rtc;
 
-// Gunakan true hanya sekali untuk menyetel RTC.
-// Setelah RTC benar, ubah menjadi false lalu upload ulang.
+// Use true only once to set the RTC.
+// After the RTC time is correct, change this to false and upload again.
 const bool SET_RTC_TIME_ON_UPLOAD = false;
 
-// Kalau laptop sudah GMT+08, biarkan 0.
-// Kalau laptop UTC dan ingin GMT+08, ubah menjadi 8.
+// If the laptop is already set to GMT+08, keep this as 0.
+// If the laptop is set to UTC and you want GMT+08, change this to 8.
 const int RTC_COMPILE_TIME_OFFSET_HOURS = 0;
 
 // ==================================================
@@ -63,17 +63,25 @@ const int soilPins[NUM_SENSORS] = {
   A0, A1, A2, A3, A4, A5
 };
 
-// Kalibrasi sementara:
-// A5 sementara disamakan dengan A4.
-// Setelah sensor A5 dites di udara kering dan tanah basah,
-// ganti dry/wet A5 sesuai hasil real.
+// Latest calibration values from individual sensor testing:
+// A0 dry = 473, wet = 292
+// A1 dry = 478, wet = 299
+// A2 dry = 478, wet = 291
+// A3 dry = 483, wet = 291
+// A4 dry = 483, wet = 281
+// A5 is temporarily set the same as A4 because the A5 sensor is not installed yet.
+// After A5 is installed, recalibrate A5 separately.
 int dryValues[NUM_SENSORS] = {
-  452, 456, 456, 460, 461, 461
+  473, 478, 478, 483, 483, 483
 };
 
 int wetValues[NUM_SENSORS] = {
-  297, 263, 262, 345, 269, 269
+  292, 299, 291, 291, 281, 281
 };
+
+// Sensor readings are averaged to make the values more stable
+const int soilSampleCount = 30;
+const int soilSampleDelayMs = 5;
 
 int rawValues[NUM_SENSORS];
 int moisturePercent[NUM_SENSORS];
@@ -95,7 +103,7 @@ const int relay1Pin = 8;
 const int relay2Pin = 9;
 const int relay3Pin = 10;
 
-// Kebanyakan relay module aktif LOW:
+// Most relay modules are active LOW:
 // LOW  = ON
 // HIGH = OFF
 const bool RELAY_ACTIVE_LOW = true;
@@ -112,18 +120,18 @@ uint32_t relay3OffTime = 0;
 // RELAY DURATION SETTINGS
 // ==================================================
 
-// Durasi relay ON = 60 detik / 1 menit
-const uint32_t relay1OnDuration = 60;   // detik
-const uint32_t relay2OnDuration = 60;   // detik
-const uint32_t relay3OnDuration = 60;   // detik
+// Relay ON duration = 60 seconds / 1 minute
+const uint32_t relay1OnDuration = 60;   // seconds
+const uint32_t relay2OnDuration = 60;   // seconds
+const uint32_t relay3OnDuration = 60;   // seconds
 
 // ==================================================
 // RELAY INTERVAL TEST SETTINGS
 // ==================================================
 
-const unsigned long relay1Interval = 3000;  // 3 detik
-const unsigned long relay2Interval = 6000;  // 6 detik
-const unsigned long relay3Interval = 9000;  // 9 detik
+const unsigned long relay1Interval = 3000;  // 3 seconds
+const unsigned long relay2Interval = 6000;  // 6 seconds
+const unsigned long relay3Interval = 9000;  // 9 seconds
 
 unsigned long lastRelay1IntervalMillis = 0;
 unsigned long lastRelay2IntervalMillis = 0;
@@ -368,8 +376,8 @@ void forceAllRelaysOff() {
 // COMMAND FROM ESP8266 / THINGSBOARD RPC
 // ==================================================
 //
-// ESP8266 mengirim command dari ThingsBoard RPC ke Mega lewat Serial1.
-// Format command yang diterima:
+// ESP8266 sends commands from ThingsBoard RPC to the Mega through Serial1.
+// Accepted command format:
 //   CMD:PUMP_1_ON
 //   CMD:PUMP_1_OFF
 //   CMD:PUMP_2_ON
@@ -378,9 +386,9 @@ void forceAllRelaysOff() {
 //   CMD:PUMP_3_OFF
 //   CMD:RESET_MEGA
 //
-// Catatan keamanan:
-// Command ON memakai startRelayX(), sehingga pompa otomatis OFF setelah
-// relayXOnDuration agar tidak menyala terus jika ada masalah koneksi.
+// Safety note:
+// ON commands use startRelayX(), so the pump automatically turns OFF after
+// relayXOnDuration to prevent it from staying ON if there is a connection issue.
 
 void resetArduinoMega() {
   Serial.println("Reset command received. Restarting Arduino Mega...");
@@ -540,9 +548,20 @@ int getExperimentDay(DateTime now) {
 // SENSOR FUNCTIONS
 // ==================================================
 
+int readSoilAverage(int pin) {
+  long total = 0;
+
+  for (int i = 0; i < soilSampleCount; i++) {
+    total += analogRead(pin);
+    delay(soilSampleDelayMs);
+  }
+
+  return total / soilSampleCount;
+}
+
 void readSoilSensors() {
   for (int i = 0; i < NUM_SENSORS; i++) {
-    rawValues[i] = analogRead(soilPins[i]);
+    rawValues[i] = readSoilAverage(soilPins[i]);
 
     moisturePercent[i] = map(
       rawValues[i],
@@ -604,13 +623,13 @@ void handleRealIrrigationSchedule(DateTime now, uint32_t currentTime) {
     return;
   }
 
-  // Zone 1: setiap hari
+  // Zone 1: every day
   if (lastWateredDayZone1 != experimentDay) {
     startRelay1(currentTime);
     lastWateredDayZone1 = experimentDay;
   }
 
-  // Zone 2: setiap 3 hari sekali
+  // Zone 2: every 3 days
   if ((experimentDay - 1) % 3 == 0) {
     if (lastWateredDayZone2 != experimentDay) {
       startRelay2(currentTime);
@@ -618,7 +637,7 @@ void handleRealIrrigationSchedule(DateTime now, uint32_t currentTime) {
     }
   }
 
-  // Zone 3: setiap 6 hari sekali
+  // Zone 3: every 6 days
   if ((experimentDay - 1) % 6 == 0) {
     if (lastWateredDayZone3 != experimentDay) {
       startRelay3(currentTime);
@@ -827,7 +846,7 @@ void setup() {
 
   Serial.println("=====================================");
   Serial.println(" Pakchoi Smart Farming System");
-  Serial.println(" Soil + DHT22 + RTC GMT+08 + Relay + ESP8266 Telemetry");
+  Serial.println(" Soil calibrated A0-A5 + DHT22 + RTC GMT+08 + Relay + ESP8266 Telemetry");
   Serial.println("=====================================");
   Serial.print("Serial1 to ESP8266 baud: ");
   Serial.println(espSerialBaud);
@@ -901,8 +920,8 @@ void loop() {
   float humidity = dht.readHumidity();
   float temperature = dht.readTemperature();
 
-  // Matikan relay dulu kalau durasi ON sudah selesai.
-  // Ini penting supaya relay tidak terlihat ON terus.
+  // Turn relays OFF first if the ON duration has finished.
+  // This is important so the relays do not appear to stay ON continuously.
   stopRelaysIfNeeded(currentTime);
 
   if (RELAY_INTERVAL_TEST_MODE) {
