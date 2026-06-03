@@ -841,12 +841,12 @@ function SoilRealtimeChart({ data }) {
           />
           <Legend />
 
-          <Line type="monotone" dataKey="A0" stroke="#38bdf8" dot={false} connectNulls />
-          <Line type="monotone" dataKey="A1" stroke="#22c55e" dot={false} connectNulls />
-          <Line type="monotone" dataKey="A2" stroke="#ef4444" dot={false} connectNulls />
-          <Line type="monotone" dataKey="A3" stroke="#facc15" dot={false} connectNulls />
-          <Line type="monotone" dataKey="A4" stroke="#94a3b8" dot={false} connectNulls />
-          <Line type="monotone" dataKey="A5" stroke="#a855f7" dot={false} connectNulls />
+          <Line type="linear" dataKey="A0" stroke="#38bdf8" dot={false} connectNulls />
+          <Line type="linear" dataKey="A1" stroke="#22c55e" dot={false} connectNulls />
+          <Line type="linear" dataKey="A2" stroke="#ef4444" dot={false} connectNulls />
+          <Line type="linear" dataKey="A3" stroke="#facc15" dot={false} connectNulls />
+          <Line type="linear" dataKey="A4" stroke="#94a3b8" dot={false} connectNulls />
+          <Line type="linear" dataKey="A5" stroke="#a855f7" dot={false} connectNulls />
         </LineChart>
       </ResponsiveContainer>
     </div>
@@ -875,7 +875,7 @@ function AirRealtimeChart({ data }) {
           <Legend />
 
           <Line
-            type="monotone"
+            type="linear"
             dataKey="temperature"
             name="Temperature °C"
             stroke="#38bdf8"
@@ -884,7 +884,7 @@ function AirRealtimeChart({ data }) {
           />
 
           <Line
-            type="monotone"
+            type="linear"
             dataKey="humidity"
             name="Humidity %"
             stroke="#22c55e"
@@ -934,16 +934,56 @@ function CctvRealtimePanel() {
 function Esp32CamPanel() {
   const ESP32_CAM_URL = import.meta.env.VITE_ESP32_CAM_URL || "";
   const [refreshKey, setRefreshKey] = useState(Date.now());
+  const [flashLoading, setFlashLoading] = useState(false);
+  const [flashMessage, setFlashMessage] = useState("");
 
   useEffect(() => {
     if (!ESP32_CAM_URL) return;
 
     const interval = setInterval(() => {
       setRefreshKey(Date.now());
-    }, 1500);
+    }, 5000);
 
     return () => clearInterval(interval);
   }, [ESP32_CAM_URL]);
+
+  const controlEsp32Flash = async (state) => {
+    if (!ESP32_CAM_URL) {
+      setFlashMessage("ESP32-CAM URL belum dikonfigurasi.");
+      return;
+    }
+
+    try {
+      setFlashLoading(true);
+      setFlashMessage("");
+
+      const isVercelWebsite = window.location.hostname.includes("vercel.app");
+
+      let requestUrl = "";
+
+      if (isVercelWebsite) {
+        requestUrl = `/api/esp32cam-flash?state=${state}`;
+      } else {
+        const localUrl = new URL(ESP32_CAM_URL);
+        localUrl.pathname = `/flash/${state}`;
+        localUrl.search = "";
+        requestUrl = localUrl.toString();
+      }
+
+      const response = await fetch(requestUrl);
+      const result = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        throw new Error(result?.message || `Flash ${state} gagal.`);
+      }
+
+      setFlashMessage(`Flash ${state.toUpperCase()} berhasil dikirim.`);
+    } catch (error) {
+      setFlashMessage(error.message || `Flash ${state} gagal.`);
+    } finally {
+      setFlashLoading(false);
+    }
+  };
 
   if (!ESP32_CAM_URL) {
     return (
@@ -955,7 +995,7 @@ function Esp32CamPanel() {
       </div>
     );
   }
-  
+
   const isVercelWebsite = window.location.hostname.includes("vercel.app");
 
   const imageUrl = isVercelWebsite
@@ -970,11 +1010,34 @@ function Esp32CamPanel() {
 
       <div className="cctv-info">
         <h3>ESP32-CAM Additional Camera</h3>
+
         <p>
           Status: <b>Connected</b>
         </p>
+
         <p>Source:</p>
         <code>{ESP32_CAM_URL}</code>
+
+        <div className="action-row" style={{ marginTop: "14px" }}>
+          <button
+            type="button"
+            disabled={flashLoading}
+            onClick={() => controlEsp32Flash("on")}
+          >
+            {flashLoading ? "Loading..." : "Flash ON"}
+          </button>
+
+          <button
+            type="button"
+            className="danger"
+            disabled={flashLoading}
+            onClick={() => controlEsp32Flash("off")}
+          >
+            {flashLoading ? "Loading..." : "Flash OFF"}
+          </button>
+        </div>
+
+        {flashMessage && <p className="note">{flashMessage}</p>}
       </div>
     </div>
   );
