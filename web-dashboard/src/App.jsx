@@ -12,7 +12,6 @@ import {
 } from "recharts";
 import "./App.css";
 
-const CCTV_STREAM_URL = "https://credible-ceremony-species.ngrok-free.dev/cctv.mjpeg";
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
@@ -26,8 +25,8 @@ const SENSOR_TABLE = "sensor_readings";
 const COMMAND_TABLE = "device_commands";
 const CAMERA_TABLE = "camera_captures";
 
-const REALTIME_WINDOW_MS = 60 * 1000; // last 1 minute
-const DASHBOARD_POLL_MS = 3000; // refresh every 3 seconds
+const REALTIME_WINDOW_MS = 60 * 1000;
+const DASHBOARD_POLL_MS = 3000;
 
 function App() {
   const [latestData, setLatestData] = useState(null);
@@ -144,7 +143,9 @@ function App() {
     }
 
     if (data) {
-      setCommands((previousCommands) => [data, ...previousCommands].slice(0, 20));
+      setCommands((previousCommands) =>
+        [data, ...previousCommands].slice(0, 20)
+      );
     }
 
     setActionMessage(`Command "${command}" berhasil dikirim ke Supabase.`);
@@ -389,42 +390,42 @@ function App() {
   }, []);
 
   const soilSensors = [
-  { name: "A0", key: "soil_z1_s1" },
-  { name: "A1", key: "soil_z1_s2" },
-  { name: "A2", key: "soil_z2_s1" },
-  { name: "A3", key: "soil_z2_s2" },
-  { name: "A4", key: "soil_z3_s1" },
-  { name: "A5", key: "soil_z3_s2" },
+    { name: "A0", key: "soil_z1_s1" },
+    { name: "A1", key: "soil_z1_s2" },
+    { name: "A2", key: "soil_z2_s1" },
+    { name: "A3", key: "soil_z2_s2" },
+    { name: "A4", key: "soil_z3_s1" },
+    { name: "A5", key: "soil_z3_s2" },
   ];
 
   const realtimeRows = [...history]
-  .filter((row) => {
-    if (!row.created_at) return false;
+    .filter((row) => {
+      if (!row.created_at) return false;
 
-    const rowTime = new Date(row.created_at).getTime();
+      const rowTime = new Date(row.created_at).getTime();
 
-    if (Number.isNaN(rowTime)) return false;
+      if (Number.isNaN(rowTime)) return false;
 
-    return Date.now() - rowTime <= REALTIME_WINDOW_MS;
-  })
-  .reverse();
+      return Date.now() - rowTime <= REALTIME_WINDOW_MS;
+    })
+    .reverse();
 
   const chartData = realtimeRows.map((row) => ({
-  time: formatTime(row.created_at),
-  temperature: toChartNumber(row.temperature),
-  humidity: toChartNumber(row.humidity),
+    time: formatTime(row.created_at),
+    temperature: toChartNumber(row.temperature),
+    humidity: toChartNumber(row.humidity),
 
-  A0: toChartNumber(row.soil_z1_s1),
-  A1: toChartNumber(row.soil_z1_s2),
-  A2: toChartNumber(row.soil_z2_s1),
-  A3: toChartNumber(row.soil_z2_s2),
-  A4: toChartNumber(row.soil_z3_s1),
-  A5: toChartNumber(row.soil_z3_s2),
+    A0: toChartNumber(row.soil_z1_s1),
+    A1: toChartNumber(row.soil_z1_s2),
+    A2: toChartNumber(row.soil_z2_s1),
+    A3: toChartNumber(row.soil_z2_s2),
+    A4: toChartNumber(row.soil_z3_s1),
+    A5: toChartNumber(row.soil_z3_s2),
 
-  zona1: average([row.soil_z1_s1, row.soil_z1_s2]),
-  zona2: average([row.soil_z2_s1, row.soil_z2_s2]),
-  zona3: average([row.soil_z3_s1, row.soil_z3_s2]),
-}));
+    zona1: average([row.soil_z1_s1, row.soil_z1_s2]),
+    zona2: average([row.soil_z2_s1, row.soil_z2_s2]),
+    zona3: average([row.soil_z3_s1, row.soil_z3_s2]),
+  }));
 
   const deviceStatus = getDeviceStatus(latestData);
 
@@ -432,32 +433,31 @@ function App() {
   const pump2Status = getPumpDisplayStatus(latestData, commands, 2);
   const pump3Status = getPumpDisplayStatus(latestData, commands, 3);
 
-
   const zoneSummaries = latestData
-  ? [
-      {
-        name: "Zona 1",
-        sensors: "A0 + A1",
-        value: average([latestData.soil_z1_s1, latestData.soil_z1_s2]),
-        pump: pump1Status.value,
-        pumpSource: pump1Status.source,
-      },
-      {
-        name: "Zona 2",
-        sensors: "A2 + A3",
-        value: average([latestData.soil_z2_s1, latestData.soil_z2_s2]),
-        pump: pump2Status.value,
-        pumpSource: pump2Status.source,
-      },
-      {
-        name: "Zona 3",
-        sensors: "A4 + A5",
-        value: average([latestData.soil_z3_s1, latestData.soil_z3_s2]),
-        pump: pump3Status.value,
-        pumpSource: pump3Status.source,
-      },
-    ]
-  : [];  
+    ? [
+        {
+          name: "Zona 1",
+          sensors: "A0 + A1",
+          value: average([latestData.soil_z1_s1, latestData.soil_z1_s2]),
+          pump: pump1Status.value,
+          pumpSource: pump1Status.source,
+        },
+        {
+          name: "Zona 2",
+          sensors: "A2 + A3",
+          value: average([latestData.soil_z2_s1, latestData.soil_z2_s2]),
+          pump: pump2Status.value,
+          pumpSource: pump2Status.source,
+        },
+        {
+          name: "Zona 3",
+          sensors: "A4 + A5",
+          value: average([latestData.soil_z3_s1, latestData.soil_z3_s2]),
+          pump: pump3Status.value,
+          pumpSource: pump3Status.source,
+        },
+      ]
+    : [];
 
   return (
     <main className="dashboard">
@@ -562,11 +562,17 @@ function App() {
                   24 Jam
                 </button>
 
-                <button className="secondary" onClick={() => setCsvPresetHours(24 * 7)}>
+                <button
+                  className="secondary"
+                  onClick={() => setCsvPresetHours(24 * 7)}
+                >
                   7 Hari
                 </button>
 
-                <button className="secondary" onClick={() => setCsvPresetHours(24 * 30)}>
+                <button
+                  className="secondary"
+                  onClick={() => setCsvPresetHours(24 * 30)}
+                >
                   30 Hari
                 </button>
 
@@ -591,15 +597,13 @@ function App() {
                 Capture ESP32-CAM ke Supabase
               </button>
 
-              <button onClick={downloadEsp32CamCSV}>
-                Download CSV ESP32-CAM
-              </button>
+              <button onClick={downloadEsp32CamCSV}>Download CSV ESP32-CAM</button>
 
               <button className="danger" onClick={resetSystem}>
                 Reset ESP + Mega
               </button>
             </div>
-            
+
             <p className="note">
               Tombol kontrol membuat command dengan status <b>pending</b> di
               Supabase. Command dibaca oleh bridge lalu diteruskan ke
@@ -640,18 +644,14 @@ function App() {
 
           <section className="panel">
             <h2>Grafik Realtime Kelembapan Tanah</h2>
-            <p className="note">
-              Realtime - last 1 minute from Supabase
-            </p>
+            <p className="note">Realtime - last 1 minute from Supabase</p>
 
             <SoilRealtimeChart data={chartData} />
           </section>
 
           <section className="panel">
             <h2>Grafik Suhu dan Kelembapan Udara</h2>
-            <p className="note">
-              Realtime - last 1 minute from DHT22
-            </p>
+            <p className="note">Realtime - last 1 minute from DHT22</p>
 
             <AirRealtimeChart data={chartData} />
           </section>
@@ -945,35 +945,45 @@ function AirRealtimeChart({ data }) {
 }
 
 function CctvRealtimePanel() {
-  const CCTV_URL = import.meta.env.VITE_CCTV_ZONE_1_URL || "";
+  const CCTV_URL = import.meta.env.VITE_CCTV_ZONE_1_URL || "/api/cctv-proxy";
+  const [refreshKey, setRefreshKey] = useState(Date.now());
 
-  if (!CCTV_URL) {
-    return (
-      <div className="cctv-placeholder">
-        <h3>CCTV Zone 1 belum disambungkan</h3>
-        <p>
-          Panel ini disiapkan untuk menampilkan stream realtime CCTV. Jika kamera
-          hanya menyediakan RTSP, diperlukan bridge di server/Ubuntu untuk
-          mengubah RTSP menjadi MJPEG/HLS agar bisa tampil di browser.
-        </p>
-      </div>
-    );
-  }
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setRefreshKey(Date.now());
+    }, 2000);
+
+    return () => clearInterval(timer);
+  }, []);
+
+  const imageUrl = `${CCTV_URL}?t=${refreshKey}`;
 
   return (
-    <div className="cctv-placeholder">
-      <img
-        src={CCTV_URL}
-        alt="CCTV Zone 1 Realtime"
-        style={{
-          width: "100%",
-          height: "420px",
-          objectFit: "contain",
-          backgroundColor: "#000",
-          borderRadius: "14px",
-          display: "block",
-        }}
-      />
+    <div className="cctv-live-layout">
+      <div className="cctv-wrapper">
+        <img
+          src={imageUrl}
+          alt="CCTV Zone 1 Realtime"
+          onError={() => {
+            console.error("CCTV failed to load:", imageUrl);
+          }}
+        />
+      </div>
+
+      <div className="cctv-info">
+        <h3>Zone 1 Live Camera</h3>
+
+        <p>
+          Status: <b>Connected</b>
+        </p>
+
+        <p>Source:</p>
+        <code>{CCTV_URL}</code>
+
+        <p className="note" style={{ marginTop: "14px" }}>
+          Mode: snapshot refresh setiap 2 detik.
+        </p>
+      </div>
     </div>
   );
 }
