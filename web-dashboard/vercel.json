@@ -1,8 +1,15 @@
 {
-  "crons": [
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "framework": "vite",
+  "rewrites": [
     {
-      "path": "/api/esp32cam-capture-upload",
-      "schedule": "0 * * * *"
+      "source": "/api/(.*)",
+      "destination": "/api/$1"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
     }
   ]
 }
