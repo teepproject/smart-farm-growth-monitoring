@@ -12,6 +12,7 @@ import {
 } from "recharts";
 import "./App.css";
 
+const CCTV_STREAM_URL = "https://credible-ceremony-species.ngrok-free.dev/cctv.mjpeg";
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
@@ -960,19 +961,19 @@ function CctvRealtimePanel() {
   }
 
   return (
-    <div className="cctv-live-layout">
-      <div className="cctv-wrapper">
-        <img src={CCTV_URL} alt="CCTV Zone 1 Realtime" />
-      </div>
-
-      <div className="cctv-info">
-        <h3>Zone 1 Live Camera</h3>
-        <p>
-          Status: <b>Connected</b>
-        </p>
-        <p>Source:</p>
-        <code>{CCTV_URL}</code>
-      </div>
+    <div className="cctv-placeholder">
+      <img
+        src={CCTV_URL}
+        alt="CCTV Zone 1 Realtime"
+        style={{
+          width: "100%",
+          height: "420px",
+          objectFit: "contain",
+          backgroundColor: "#000",
+          borderRadius: "14px",
+          display: "block",
+        }}
+      />
     </div>
   );
 }
