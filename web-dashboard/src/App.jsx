@@ -951,7 +951,7 @@ function CctvRealtimePanel() {
   useEffect(() => {
     const timer = setInterval(() => {
       setRefreshKey(Date.now());
-    }, 1000);
+    }, 10000);
 
     return () => clearInterval(timer);
   }, []);
@@ -981,7 +981,7 @@ function CctvRealtimePanel() {
         <code>{CCTV_URL}</code>
 
         <p className="note" style={{ marginTop: "14px" }}>
-          Mode: snapshot refresh setiap 1 detik.
+          Mode: snapshot refresh setiap 10 detik.
         </p>
       </div>
     </div>
