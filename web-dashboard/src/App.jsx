@@ -159,13 +159,6 @@ function App() {
     });
   }
 
-  async function requestCameraCapture() {
-    await sendCommand("capture_camera_zone_1", true, {
-      camera_id: "zone_1",
-      action: "capture",
-    });
-  }
-
   async function resetSystem() {
     const confirmed = window.confirm(
       "Reset ESP8266 and Arduino Mega now? The system will be disconnected for a few seconds."
@@ -181,30 +174,6 @@ function App() {
     });
   }
 
-  async function captureEsp32CamToSupabase() {
-    setActionMessage("Capturing ESP32-CAM image and saving it to Supabase...");
-
-    try {
-      const response = await fetch("/api/esp32cam-capture-upload", {
-        method: "POST",
-      });
-
-      const result = await response.json();
-
-      if (!response.ok || !result.success) {
-        throw new Error(result.message || "Failed to save ESP32-CAM image.");
-      }
-
-      setActionMessage(
-        `ESP32-CAM image was successfully saved to Supabase. Time: ${formatDate(
-          result.capture?.captured_at
-        )}`
-      );
-    } catch (error) {
-      setActionMessage(error.message || "Failed to save ESP32-CAM image.");
-    }
-  }
-
   function downloadEsp32CamCSV() {
     const params = new URLSearchParams();
 
@@ -217,6 +186,92 @@ function App() {
     }
 
     window.open(`/api/esp32cam-captures-csv?${params.toString()}`, "_blank");
+  }
+
+  async function downloadSupabaseTableCSV(tableName, filePrefix, label) {
+    if (!supabase) {
+      setActionMessage("Supabase is not ready. Check the environment configuration.");
+      return;
+    }
+
+    setActionMessage("");
+
+    const startDate = csvStartDate ? new Date(csvStartDate) : null;
+    const endDate = csvEndDate ? new Date(csvEndDate) : null;
+
+    if (startDate && Number.isNaN(startDate.getTime())) {
+      setActionMessage("Start date is invalid.");
+      return;
+    }
+
+    if (endDate && Number.isNaN(endDate.getTime())) {
+      setActionMessage("End date is invalid.");
+      return;
+    }
+
+    if (startDate && endDate && startDate > endDate) {
+      setActionMessage("Start date cannot be later than end date.");
+      return;
+    }
+
+    let query = supabase.from(tableName).select("*");
+
+    if (startDate) {
+      query = query.gte("created_at", startDate.toISOString());
+    }
+
+    if (endDate) {
+      query = query.lte("created_at", endDate.toISOString());
+    }
+
+    query = query.order("created_at", { ascending: true }).limit(10000);
+
+    const { data, error } = await query;
+
+    if (error) {
+      setActionMessage(`Failed to download ${label}: ${error.message}`);
+      return;
+    }
+
+    if (!data || data.length === 0) {
+      setActionMessage(`No ${label} found for the selected period.`);
+      return;
+    }
+
+    const columns = Object.keys(data[0]);
+
+    const csvRows = [
+      columns.join(","),
+      ...data.map((row) =>
+        columns.map((column) => csvEscape(row[column])).join(",")
+      ),
+    ];
+
+    const csvContent = csvRows.join("\n");
+    const blob = new Blob([csvContent], {
+      type: "text/csv;charset=utf-8;",
+    });
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    const startLabel = csvStartDate || "start";
+    const endLabel = csvEndDate || "end";
+    const periodLabel = `${startLabel}_to_${endLabel}`
+      .replaceAll(":", "-")
+      .replaceAll("T", "_");
+
+    link.href = url;
+    link.download = `${filePrefix}-${periodLabel}.csv`;
+    link.click();
+
+    URL.revokeObjectURL(url);
+
+    setActionMessage(`${label} downloaded successfully. Total rows: ${data.length}.`);
+  }
+
+  async function downloadCctvData() {
+    await downloadSupabaseTableCSV(CAMERA_TABLE, "smart-farm-cctv-data", "CCTV data");
   }
 
   function setCsvPresetHours(hours) {
@@ -467,7 +522,7 @@ function App() {
           <h1>Growth Monitoring Dashboard</h1>
           <p className="subtitle">
             Sensor monitoring, real-time charts, pump status, command control,
-            data download, system reset, and CCTV capture request.
+            data download and system reset.
           </p>
         </div>
 
@@ -581,6 +636,12 @@ function App() {
                 </button>
 
                 <button onClick={downloadCSV}>Download CSV</button>
+
+                <button onClick={downloadCctvData}>Download CCTV Data</button>
+
+                <button onClick={downloadEsp32CamCSV}>
+                  Download ESP32-CAM Data
+                </button>
               </div>
 
               <p className="note">
@@ -591,21 +652,13 @@ function App() {
             </div>
 
             <div className="action-row">
-              <button onClick={requestCameraCapture}>Capture CCTV Zone 1</button>
-
-              <button onClick={captureEsp32CamToSupabase}>
-                Capture ESP32-CAM to Supabase
-              </button>
-
-              <button onClick={downloadEsp32CamCSV}>Download CSV ESP32-CAM</button>
-
               <button className="danger" onClick={resetSystem}>
                 Reset ESP + Mega
               </button>
             </div>
 
             <p className="note">
-              The control buttons create commands with <b>pending</b> status in
+              The pump and reset buttons create commands with <b>pending</b> status in
               Supabase. The bridge reads the commands and forwards them to
               ThingsBoard/ESP.
             </p>
