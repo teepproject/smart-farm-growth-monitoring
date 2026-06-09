@@ -730,7 +730,7 @@ function App() {
                           {row.status}
                         </span>
                       </td>
-                      <td>{row.response || "-"}</td>
+                      <td>{translateCommandResponse(row.response)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -981,7 +981,7 @@ function CctvRealtimePanel() {
         <code>{CCTV_URL}</code>
 
         <p className="note" style={{ marginTop: "14px" }}>
-          Mode: snapshot refresh every 10 seconds.
+          Mode: snapshot refresh every 3 seconds.
         </p>
       </div>
     </div>
@@ -1287,6 +1287,18 @@ function toBooleanValue(value) {
   const text = String(value ?? "").trim().toLowerCase();
 
   return text === "true" || text === "on" || text === "1";
+}
+
+function translateCommandResponse(response) {
+  if (!response) return "-";
+
+  return String(response)
+    .replaceAll("berhasil dikirim.", "sent successfully.")
+    .replaceAll("berhasil dikirim", "sent successfully")
+    .replaceAll("RPC ThingsBoard gagal:", "ThingsBoard RPC failed:")
+    .replaceAll("ThingsBoard gagal:", "ThingsBoard failed:")
+    .replaceAll("gagal.", "failed.")
+    .replaceAll("gagal", "failed");
 }
 
 export default App;
