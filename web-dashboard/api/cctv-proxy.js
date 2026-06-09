@@ -1,13 +1,22 @@
 export default async function handler(req, res) {
   const CCTV_URL =
     process.env.CCTV_ZONE_1_URL ||
-    "https://credible-ceremony-species.ngrok-free.dev/cctv.jpg";
+    "https://sets-maintain-nuke-trustee.trycloudflare.com/cctv.jpg";
 
   try {
-    const response = await fetch(CCTV_URL, {
+    const refreshKey = req.query?.t || Date.now();
+
+    const upstreamUrl = CCTV_URL.includes("?")
+      ? `${CCTV_URL}&t=${refreshKey}`
+      : `${CCTV_URL}?t=${refreshKey}`;
+
+    const response = await fetch(upstreamUrl, {
+      cache: "no-store",
       headers: {
         "ngrok-skip-browser-warning": "true",
         "User-Agent": "Mozilla/5.0",
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
       },
     });
 
@@ -41,7 +50,9 @@ export default async function handler(req, res) {
     const buffer = Buffer.from(arrayBuffer);
 
     res.setHeader("Content-Type", "image/jpeg");
-    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
     res.status(200).send(buffer);
   } catch (error) {
     console.error("CCTV proxy error:", error);

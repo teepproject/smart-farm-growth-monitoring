@@ -951,7 +951,7 @@ function CctvRealtimePanel() {
   useEffect(() => {
     const timer = setInterval(() => {
       setRefreshKey(Date.now());
-    }, 10000);
+    }, 3000);
 
     return () => clearInterval(timer);
   }, []);
