@@ -250,3 +250,321 @@ app.listen(PORT, () => {
   console.log(`ESP32-CAM Latest: http://localhost:${PORT}/esp32cam/latest.jpg`);
   console.log(`ESP32-CAM Status: http://localhost:${PORT}/esp32cam/status`);
 });
+
+// =====================================================
+// AUTO CAPTURE CCTV + ESP32-CAM TO SUPABASE
+// Paste this block at the very bottom of server.js
+// =====================================================
+
+require("dotenv").config();
+
+const {
+  createClient: createSupabaseClientForAutoCapture,
+} = require("@supabase/supabase-js");
+
+const AUTO_SUPABASE_URL = process.env.SUPABASE_URL || "";
+const AUTO_SUPABASE_SERVICE_ROLE_KEY =
+  process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+const AUTO_SUPABASE_STORAGE_BUCKET =
+  process.env.SUPABASE_STORAGE_BUCKET || "camera-captures";
+
+const AUTO_CAMERA_TABLE = "camera_captures";
+
+const AUTO_CAPTURE_ENABLED =
+  String(process.env.AUTO_CAPTURE_ENABLED || "true").toLowerCase() === "true";
+
+const AUTO_CAPTURE_INTERVAL_MINUTES =
+  Number(process.env.AUTO_CAPTURE_INTERVAL_MINUTES || 60) || 60;
+
+const AUTO_CAPTURE_INTERVAL_MS = AUTO_CAPTURE_INTERVAL_MINUTES * 60 * 1000;
+
+const autoSupabase =
+  AUTO_SUPABASE_URL && AUTO_SUPABASE_SERVICE_ROLE_KEY
+    ? createSupabaseClientForAutoCapture(
+        AUTO_SUPABASE_URL,
+        AUTO_SUPABASE_SERVICE_ROLE_KEY
+      )
+    : null;
+
+let autoCaptureRunning = false;
+let lastAutoCaptureAt = null;
+
+function autoCaptureTimestamp() {
+  const now = new Date();
+  const pad = (value) => String(value).padStart(2, "0");
+
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(
+    now.getDate()
+  )}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
+}
+
+function autoCaptureCctvBuffer() {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+
+    const ffmpeg = spawn(ffmpegPath, [
+      "-rtsp_transport",
+      "tcp",
+      "-i",
+      CCTV_RTSP_URL,
+      "-frames:v",
+      "1",
+      "-vf",
+      "scale=640:-1",
+      "-q:v",
+      "8",
+      "-f",
+      "image2pipe",
+      "-vcodec",
+      "mjpeg",
+      "pipe:1",
+    ]);
+
+    const timeout = setTimeout(() => {
+      ffmpeg.kill();
+      reject(new Error("CCTV capture timeout"));
+    }, 20000);
+
+    ffmpeg.stdout.on("data", (chunk) => {
+      chunks.push(chunk);
+    });
+
+    ffmpeg.stderr.on("data", (data) => {
+      console.error("[AUTO CCTV FFmpeg]", data.toString());
+    });
+
+    ffmpeg.on("error", (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+
+    ffmpeg.on("close", (code) => {
+      clearTimeout(timeout);
+
+      const buffer = Buffer.concat(chunks);
+
+      if (buffer.length === 0) {
+        reject(new Error(`CCTV capture returned empty buffer. Code: ${code}`));
+        return;
+      }
+
+      resolve(buffer);
+    });
+  });
+}
+
+async function autoFetchImageBuffer(url, label) {
+  const requestUrl = url.includes("?")
+    ? `${url}&t=${Date.now()}`
+    : `${url}?t=${Date.now()}`;
+
+  const response = await fetch(requestUrl, {
+    cache: "no-store",
+    headers: {
+      "Cache-Control": "no-cache, no-store, must-revalidate",
+      Pragma: "no-cache",
+      "User-Agent": "SmartFarmCameraBridge/1.0",
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`${label} failed. Status: ${response.status}`);
+  }
+
+  const contentType = response.headers.get("content-type") || "";
+
+  if (!contentType.includes("image")) {
+    const text = await response.text().catch(() => "");
+    throw new Error(
+      `${label} did not return image. Content-Type: ${contentType}. Body: ${text.slice(
+        0,
+        200
+      )}`
+    );
+  }
+
+  const arrayBuffer = await response.arrayBuffer();
+  return Buffer.from(arrayBuffer);
+}
+
+async function uploadAutoCameraCapture(cameraId, imageBuffer, note) {
+  if (!autoSupabase) {
+    throw new Error(
+      "Supabase belum siap. Periksa SUPABASE_URL dan SUPABASE_SERVICE_ROLE_KEY di file .env."
+    );
+  }
+
+  const timestamp = autoCaptureTimestamp();
+  const filePath = `${cameraId}/${timestamp}.jpg`;
+
+  const { error: uploadError } = await autoSupabase.storage
+    .from(AUTO_SUPABASE_STORAGE_BUCKET)
+    .upload(filePath, imageBuffer, {
+      contentType: "image/jpeg",
+      cacheControl: "3600",
+      upsert: false,
+    });
+
+  if (uploadError) {
+    throw new Error(`Upload ${cameraId} gagal: ${uploadError.message}`);
+  }
+
+  const { data: publicUrlData } = autoSupabase.storage
+    .from(AUTO_SUPABASE_STORAGE_BUCKET)
+    .getPublicUrl(filePath);
+
+  const imageUrl = publicUrlData.publicUrl;
+
+  const { data, error: insertError } = await autoSupabase
+    .from(AUTO_CAMERA_TABLE)
+    .insert({
+      camera_id: cameraId,
+      image_url: imageUrl,
+      status: "done",
+      note,
+    })
+    .select("*")
+    .single();
+
+  if (insertError) {
+    throw new Error(`Insert metadata ${cameraId} gagal: ${insertError.message}`);
+  }
+
+  return data;
+}
+
+async function runAutoCaptureBothCameras(reason = "auto-hourly-capture") {
+  if (autoCaptureRunning) {
+    console.log("[AUTO CAPTURE] Previous capture still running. Skipped.");
+
+    return {
+      success: false,
+      skipped: true,
+      message: "Previous capture still running.",
+    };
+  }
+
+  autoCaptureRunning = true;
+
+  const result = {
+    success: true,
+    reason,
+    started_at: new Date().toISOString(),
+    cctv: null,
+    esp32cam: null,
+    errors: [],
+  };
+
+  console.log("==========================================");
+  console.log("[AUTO CAPTURE] Starting:", reason);
+  console.log("==========================================");
+
+  try {
+    try {
+      console.log("[AUTO CAPTURE] Capturing CCTV Zone 1...");
+
+      const cctvBuffer = await autoCaptureCctvBuffer();
+
+      const cctvRow = await uploadAutoCameraCapture(
+        "cctv_zone_1",
+        cctvBuffer,
+        reason
+      );
+
+      result.cctv = cctvRow;
+      console.log("[AUTO CAPTURE] CCTV uploaded:", cctvRow.image_url);
+    } catch (error) {
+      console.error("[AUTO CAPTURE] CCTV error:", error.message);
+
+      result.success = false;
+      result.errors.push({
+        camera: "cctv_zone_1",
+        message: error.message,
+      });
+    }
+
+    try {
+      console.log("[AUTO CAPTURE] Capturing ESP32-CAM...");
+
+      const esp32Buffer = await autoFetchImageBuffer(
+        `${ESP32_CAM_BASE_URL}/jpg`,
+        "ESP32-CAM auto capture"
+      );
+
+      const esp32Row = await uploadAutoCameraCapture(
+        "esp32_cam",
+        esp32Buffer,
+        reason
+      );
+
+      result.esp32cam = esp32Row;
+      console.log("[AUTO CAPTURE] ESP32-CAM uploaded:", esp32Row.image_url);
+    } catch (error) {
+      console.error("[AUTO CAPTURE] ESP32-CAM error:", error.message);
+
+      result.success = false;
+      result.errors.push({
+        camera: "esp32_cam",
+        message: error.message,
+      });
+    }
+
+    result.finished_at = new Date().toISOString();
+    lastAutoCaptureAt = result.finished_at;
+
+    console.log("[AUTO CAPTURE] Finished:", result);
+
+    return result;
+  } finally {
+    autoCaptureRunning = false;
+  }
+}
+
+app.get("/auto-capture/status", (req, res) => {
+  res.json({
+    enabled: AUTO_CAPTURE_ENABLED,
+    intervalMinutes: AUTO_CAPTURE_INTERVAL_MINUTES,
+    intervalMs: AUTO_CAPTURE_INTERVAL_MS,
+    running: autoCaptureRunning,
+    lastAutoCaptureAt,
+    supabaseReady: Boolean(autoSupabase),
+    bucket: AUTO_SUPABASE_STORAGE_BUCKET,
+    table: AUTO_CAMERA_TABLE,
+  });
+});
+
+app.get("/auto-capture/run", async (req, res) => {
+  try {
+    const result = await runAutoCaptureBothCameras("manual-http-auto-capture");
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
+if (AUTO_CAPTURE_ENABLED) {
+  console.log(
+    `[AUTO CAPTURE] Enabled. Interval: ${AUTO_CAPTURE_INTERVAL_MINUTES} minutes.`
+  );
+
+  console.log(
+    `Auto Capture Status: http://localhost:${PORT}/auto-capture/status`
+  );
+
+  console.log(`Auto Capture Run: http://localhost:${PORT}/auto-capture/run`);
+
+  setInterval(() => {
+    runAutoCaptureBothCameras("auto-hourly-capture");
+  }, AUTO_CAPTURE_INTERVAL_MS);
+} else {
+  console.log("[AUTO CAPTURE] Disabled.");
+}
+
+if (!autoSupabase) {
+  console.warn(
+    "[AUTO CAPTURE] Supabase belum siap. Periksa file .env di folder cctv-bridge."
+  );
+}

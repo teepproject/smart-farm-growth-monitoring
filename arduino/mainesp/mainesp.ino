@@ -53,14 +53,14 @@ const unsigned long MEGA_SERIAL_BAUD = 4800;
 // WIFI SETTINGS
 // ==================================================
 
-const char* WIFI_SSID = "qwertyuiop";
-const char* WIFI_PASSWORD = "00000000";
+const char* WIFI_SSID = "K410";
+const char* WIFI_PASSWORD = "amaap67674";
 
 // ==================================================
 // THINGSBOARD MQTT SETTINGS
 // ==================================================
 
-const char* THINGSBOARD_HOST = "192.168.137.1";
+const char* THINGSBOARD_HOST = "192.168.0.189";
 const int THINGSBOARD_MQTT_PORT = 1883;
 
 // Access token device ThingsBoard

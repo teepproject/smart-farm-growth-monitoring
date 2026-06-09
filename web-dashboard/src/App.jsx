@@ -48,7 +48,7 @@ function App() {
     if (!supabase) {
       setLoading(false);
       setErrorMessage(
-        "Supabase belum dikonfigurasi. Periksa VITE_SUPABASE_URL dan VITE_SUPABASE_ANON_KEY."
+        "Supabase is not configured. Check VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY."
       );
       return;
     }
@@ -62,7 +62,7 @@ function App() {
     try {
       await Promise.all([fetchSensorData(), fetchCommands(), fetchCaptures()]);
     } catch (error) {
-      setErrorMessage(error.message || "Gagal mengambil data.");
+      setErrorMessage(error.message || "Failed to fetch data.");
     } finally {
       if (showLoading) {
         setLoading(false);
@@ -116,7 +116,7 @@ function App() {
 
   async function sendCommand(command, value, payload = {}) {
     if (!supabase) {
-      setActionMessage("Supabase belum siap. Periksa konfigurasi environment.");
+      setActionMessage("Supabase is not ready. Check the environment configuration.");
       return;
     }
 
@@ -138,7 +138,7 @@ function App() {
       .single();
 
     if (error) {
-      setActionMessage(`Gagal membuat command: ${error.message}`);
+      setActionMessage(`Failed to create command: ${error.message}`);
       return;
     }
 
@@ -148,7 +148,7 @@ function App() {
       );
     }
 
-    setActionMessage(`Command "${command}" berhasil dikirim ke Supabase.`);
+    setActionMessage(`Command "${command}" was successfully sent to Supabase.`);
     fetchCommands();
   }
 
@@ -168,7 +168,7 @@ function App() {
 
   async function resetSystem() {
     const confirmed = window.confirm(
-      "Reset ESP8266 dan Arduino Mega sekarang? Sistem akan terputus beberapa detik."
+      "Reset ESP8266 and Arduino Mega now? The system will be disconnected for a few seconds."
     );
 
     if (!confirmed) {
@@ -182,7 +182,7 @@ function App() {
   }
 
   async function captureEsp32CamToSupabase() {
-    setActionMessage("Mengambil foto ESP32-CAM dan menyimpan ke Supabase...");
+    setActionMessage("Capturing ESP32-CAM image and saving it to Supabase...");
 
     try {
       const response = await fetch("/api/esp32cam-capture-upload", {
@@ -192,16 +192,16 @@ function App() {
       const result = await response.json();
 
       if (!response.ok || !result.success) {
-        throw new Error(result.message || "Gagal menyimpan foto ESP32-CAM.");
+        throw new Error(result.message || "Failed to save ESP32-CAM image.");
       }
 
       setActionMessage(
-        `Foto ESP32-CAM berhasil disimpan ke Supabase. Waktu: ${formatDate(
+        `ESP32-CAM image was successfully saved to Supabase. Time: ${formatDate(
           result.capture?.captured_at
         )}`
       );
     } catch (error) {
-      setActionMessage(error.message || "Gagal menyimpan foto ESP32-CAM.");
+      setActionMessage(error.message || "Failed to save ESP32-CAM image.");
     }
   }
 
@@ -234,7 +234,7 @@ function App() {
 
   async function downloadCSV() {
     if (!supabase) {
-      setActionMessage("Supabase belum siap. Periksa konfigurasi environment.");
+      setActionMessage("Supabase is not ready. Check the environment configuration.");
       return;
     }
 
@@ -244,17 +244,17 @@ function App() {
     const endDate = csvEndDate ? new Date(csvEndDate) : null;
 
     if (startDate && Number.isNaN(startDate.getTime())) {
-      setActionMessage("Tanggal awal tidak valid.");
+      setActionMessage("Start date is invalid.");
       return;
     }
 
     if (endDate && Number.isNaN(endDate.getTime())) {
-      setActionMessage("Tanggal akhir tidak valid.");
+      setActionMessage("End date is invalid.");
       return;
     }
 
     if (startDate && endDate && startDate > endDate) {
-      setActionMessage("Tanggal awal tidak boleh lebih besar dari tanggal akhir.");
+      setActionMessage("Start date cannot be later than end date.");
       return;
     }
 
@@ -276,12 +276,12 @@ function App() {
     const { data, error } = await query;
 
     if (error) {
-      setActionMessage(`Gagal download CSV: ${error.message}`);
+      setActionMessage(`Failed to download CSV: ${error.message}`);
       return;
     }
 
     if (!data || data.length === 0) {
-      setActionMessage("Tidak ada data pada periode yang dipilih.");
+      setActionMessage("No data found for the selected period.");
       return;
     }
 
@@ -338,8 +338,8 @@ function App() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
 
-    const startLabel = csvStartDate || "awal";
-    const endLabel = csvEndDate || "akhir";
+    const startLabel = csvStartDate || "start";
+    const endLabel = csvEndDate || "end";
     const periodLabel = `${startLabel}_to_${endLabel}`
       .replaceAll(":", "-")
       .replaceAll("T", "_");
@@ -351,7 +351,7 @@ function App() {
     URL.revokeObjectURL(url);
 
     setActionMessage(
-      `CSV berhasil di-download. Jumlah data: ${data.length} baris.`
+      `CSV downloaded successfully. Total rows: ${data.length}.`
     );
   }
 
@@ -436,21 +436,21 @@ function App() {
   const zoneSummaries = latestData
     ? [
         {
-          name: "Zona 1",
+          name: "Zone 1",
           sensors: "A0 + A1",
           value: average([latestData.soil_z1_s1, latestData.soil_z1_s2]),
           pump: pump1Status.value,
           pumpSource: pump1Status.source,
         },
         {
-          name: "Zona 2",
+          name: "Zone 2",
           sensors: "A2 + A3",
           value: average([latestData.soil_z2_s1, latestData.soil_z2_s2]),
           pump: pump2Status.value,
           pumpSource: pump2Status.source,
         },
         {
-          name: "Zona 3",
+          name: "Zone 3",
           sensors: "A4 + A5",
           value: average([latestData.soil_z3_s1, latestData.soil_z3_s2]),
           pump: pump3Status.value,
@@ -466,19 +466,19 @@ function App() {
           <p className="label">Smart Farm Monitoring</p>
           <h1>Growth Monitoring Dashboard</h1>
           <p className="subtitle">
-            Monitoring sensor, grafik realtime, status pompa, command kontrol,
-            download data, reset system, dan request capture CCTV.
+            Sensor monitoring, real-time charts, pump status, command control,
+            data download, system reset, and CCTV capture request.
           </p>
         </div>
 
         <button onClick={() => fetchAllData(true)}>Refresh Data</button>
       </section>
 
-      {loading && <p className="info">Mengambil data dari Supabase...</p>}
+      {loading && <p className="info">Fetching data from Supabase...</p>}
 
       {errorMessage && (
         <div className="error">
-          <b>Gagal mengambil data:</b>
+          <b>Failed to fetch data:</b>
           <p>{errorMessage}</p>
         </div>
       )}
@@ -487,21 +487,21 @@ function App() {
 
       {!loading && !latestData && !errorMessage && (
         <div className="empty">
-          Belum ada data sensor di tabel <code>{SENSOR_TABLE}</code>.
+          No sensor data found in table <code>{SENSOR_TABLE}</code>.
         </div>
       )}
 
       {latestData && (
         <>
           <section className="grid">
-            <Card title="Suhu Udara" value={latestData.temperature} unit="°C" />
-            <Card title="Kelembapan Udara" value={latestData.humidity} unit="%" />
-            <Card title="Pompa Zona 1" value={pumpLabel(pump1Status)} />
-            <Card title="Pompa Zona 2" value={pumpLabel(pump2Status)} />
-            <Card title="Pompa Zona 3" value={pumpLabel(pump3Status)} />
-            <Card title="Update Terakhir" value={formatDate(latestData.created_at)} />
+            <Card title="Air Temperature" value={latestData.temperature} unit="°C" />
+            <Card title="Air Humidity" value={latestData.humidity} unit="%" />
+            <Card title="Zone 1 Pump" value={pumpLabel(pump1Status)} />
+            <Card title="Zone 2 Pump" value={pumpLabel(pump2Status)} />
+            <Card title="Zone 3 Pump" value={pumpLabel(pump3Status)} />
+            <Card title="Last Update" value={formatDate(latestData.created_at)} />
             <StatusCard
-              title="Status Device"
+              title="Device Status"
               value={deviceStatus.label}
               status={deviceStatus.status}
             />
@@ -512,30 +512,30 @@ function App() {
 
             <div className="control-grid">
               <ControlBox
-                title="Pompa Zona 1"
+                title="Zone 1 Pump"
                 onTurnOn={() => controlPump(1, true)}
                 onTurnOff={() => controlPump(1, false)}
               />
 
               <ControlBox
-                title="Pompa Zona 2"
+                title="Zone 2 Pump"
                 onTurnOn={() => controlPump(2, true)}
                 onTurnOff={() => controlPump(2, false)}
               />
 
               <ControlBox
-                title="Pompa Zona 3"
+                title="Zone 3 Pump"
                 onTurnOn={() => controlPump(3, true)}
                 onTurnOff={() => controlPump(3, false)}
               />
             </div>
 
             <div className="download-panel">
-              <h3>Download CSV Berdasarkan Periode</h3>
+              <h3>Download CSV by Period</h3>
 
               <div className="date-filter-grid">
                 <label>
-                  Dari
+                  From
                   <input
                     type="datetime-local"
                     value={csvStartDate}
@@ -544,7 +544,7 @@ function App() {
                 </label>
 
                 <label>
-                  Sampai
+                  To
                   <input
                     type="datetime-local"
                     value={csvEndDate}
@@ -555,38 +555,38 @@ function App() {
 
               <div className="preset-row">
                 <button className="secondary" onClick={() => setCsvPresetHours(1)}>
-                  1 Jam
+                  1 Hour
                 </button>
 
                 <button className="secondary" onClick={() => setCsvPresetHours(24)}>
-                  24 Jam
+                  24 Hours
                 </button>
 
                 <button
                   className="secondary"
                   onClick={() => setCsvPresetHours(24 * 7)}
                 >
-                  7 Hari
+                  7 Days
                 </button>
 
                 <button
                   className="secondary"
                   onClick={() => setCsvPresetHours(24 * 30)}
                 >
-                  30 Hari
+                  30 Days
                 </button>
 
                 <button className="secondary" onClick={clearCsvPeriod}>
-                  Semua Data
+                  All Data
                 </button>
 
                 <button onClick={downloadCSV}>Download CSV</button>
               </div>
 
               <p className="note">
-                CSV akan diambil dari tabel sensor berdasarkan kolom{" "}
-                <b>created_at</b>. Jika memilih “Semua Data”, batas maksimal
-                sementara adalah 10.000 baris.
+                CSV will be generated from the sensor table based on the{" "}
+                <b>created_at</b> column. If you choose “All Data”, the current
+                temporary limit is 10,000 rows.
               </p>
             </div>
 
@@ -594,7 +594,7 @@ function App() {
               <button onClick={requestCameraCapture}>Capture CCTV Zone 1</button>
 
               <button onClick={captureEsp32CamToSupabase}>
-                Capture ESP32-CAM ke Supabase
+                Capture ESP32-CAM to Supabase
               </button>
 
               <button onClick={downloadEsp32CamCSV}>Download CSV ESP32-CAM</button>
@@ -605,14 +605,14 @@ function App() {
             </div>
 
             <p className="note">
-              Tombol kontrol membuat command dengan status <b>pending</b> di
-              Supabase. Command dibaca oleh bridge lalu diteruskan ke
+              The control buttons create commands with <b>pending</b> status in
+              Supabase. The bridge reads the commands and forwards them to
               ThingsBoard/ESP.
             </p>
           </section>
 
           <section className="panel">
-            <h2>Ringkasan Zona</h2>
+            <h2>Zone Summary</h2>
 
             <div className="zone-grid">
               {zoneSummaries.map((zone) => (
@@ -629,7 +629,7 @@ function App() {
           </section>
 
           <section className="panel">
-            <h2>Kelembapan Tanah</h2>
+            <h2>Soil Moisture</h2>
 
             <div className="soil-grid">
               {soilSensors.map((sensor) => (
@@ -643,14 +643,14 @@ function App() {
           </section>
 
           <section className="panel">
-            <h2>Grafik Realtime Kelembapan Tanah</h2>
+            <h2>Real-Time Soil Moisture Chart</h2>
             <p className="note">Realtime - last 1 minute from Supabase</p>
 
             <SoilRealtimeChart data={chartData} />
           </section>
 
           <section className="panel">
-            <h2>Grafik Suhu dan Kelembapan Udara</h2>
+            <h2>Air Temperature and Humidity Chart</h2>
             <p className="note">Realtime - last 1 minute from DHT22</p>
 
             <AirRealtimeChart data={chartData} />
@@ -667,14 +667,14 @@ function App() {
           </section>
 
           <section className="panel">
-            <h2>Riwayat Data Terbaru</h2>
+            <h2>Latest Data History</h2>
 
             <div className="table-wrapper">
               <table>
                 <thead>
                   <tr>
-                    <th>Waktu</th>
-                    <th>Suhu</th>
+                    <th>Time</th>
+                    <th>Temperature</th>
                     <th>Humidity</th>
                     <th>A0</th>
                     <th>A1</th>
@@ -705,13 +705,13 @@ function App() {
           </section>
 
           <section className="panel">
-            <h2>Riwayat Command</h2>
+            <h2>Command History</h2>
 
             <div className="table-wrapper">
               <table>
                 <thead>
                   <tr>
-                    <th>Waktu</th>
+                    <th>Time</th>
                     <th>Command</th>
                     <th>Value</th>
                     <th>Status</th>
@@ -742,7 +742,7 @@ function App() {
             <h2>Capture CCTV</h2>
 
             {captures.length === 0 && (
-              <p className="note">Belum ada hasil capture CCTV.</p>
+              <p className="note">No CCTV captures available yet.</p>
             )}
 
             <div className="capture-grid">
@@ -869,7 +869,7 @@ function SoilCard({ name, value }) {
 
 function SoilRealtimeChart({ data }) {
   if (!data || data.length === 0) {
-    return <p className="note">Belum ada data untuk grafik kelembapan tanah.</p>;
+    return <p className="note">No data available for the soil moisture chart.</p>;
   }
 
   return (
@@ -902,7 +902,7 @@ function SoilRealtimeChart({ data }) {
 
 function AirRealtimeChart({ data }) {
   if (!data || data.length === 0) {
-    return <p className="note">Belum ada data untuk grafik suhu dan humidity.</p>;
+    return <p className="note">No data available for the air temperature and humidity chart.</p>;
   }
 
   return (
@@ -981,7 +981,7 @@ function CctvRealtimePanel() {
         <code>{CCTV_URL}</code>
 
         <p className="note" style={{ marginTop: "14px" }}>
-          Mode: snapshot refresh setiap 10 detik.
+          Mode: snapshot refresh every 10 seconds.
         </p>
       </div>
     </div>
@@ -1016,7 +1016,7 @@ function Esp32CamPanel() {
 
     try {
       setFlashLoading(true);
-      setFlashMessage(`Mengirim Flash ${state.toUpperCase()}...`);
+      setFlashMessage(`Sending Flash ${state.toUpperCase()}...`);
 
       const response = await fetch(requestUrl, {
         method: "GET",
@@ -1039,7 +1039,7 @@ function Esp32CamPanel() {
       }
 
       setFlashMessage(
-        `Flash ${state.toUpperCase()} berhasil. ${
+        `Flash ${state.toUpperCase()} successful. ${
           result?.response ? `Response: ${result.response}` : ""
         }`
       );
@@ -1047,7 +1047,7 @@ function Esp32CamPanel() {
       console.log("ESP32-CAM flash success:", result);
     } catch (error) {
       console.error("ESP32-CAM flash error:", error);
-      setFlashMessage(error.message || `Flash ${state} gagal.`);
+      setFlashMessage(error.message || `Flash ${state} failed.`);
     } finally {
       setFlashLoading(false);
     }
@@ -1097,7 +1097,7 @@ function Esp32CamPanel() {
         {flashMessage && <p className="note">{flashMessage}</p>}
 
         <p className="note" style={{ marginTop: "14px" }}>
-          Mode: snapshot refresh setiap 3 detik.
+          Mode: snapshot refresh every 3 seconds.
         </p>
       </div>
     </div>
@@ -1107,7 +1107,7 @@ function Esp32CamPanel() {
 function getSoilStatus(value) {
   if (value <= 30) {
     return {
-      label: "Kering",
+      label: "Dry",
       className: "dry",
     };
   }
@@ -1120,7 +1120,7 @@ function getSoilStatus(value) {
   }
 
   return {
-    label: "Basah",
+    label: "Wet",
     className: "wet",
   };
 }
@@ -1170,7 +1170,7 @@ function formatDate(value) {
     return "-";
   }
 
-  return date.toLocaleString("id-ID");
+  return date.toLocaleString("en-US");
 }
 
 function formatTime(value) {
@@ -1182,7 +1182,7 @@ function formatTime(value) {
     return "-";
   }
 
-  return date.toLocaleTimeString("id-ID", {
+  return date.toLocaleTimeString("en-US", {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",

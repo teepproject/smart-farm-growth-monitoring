@@ -33,9 +33,8 @@ const char* NTP_SERVER_2 = "time.google.com";
 const int FLASH_ON_HOUR = 19;   // 7 PM
 const int FLASH_OFF_HOUR = 6;   // 6 AM
 
-// Manual flash dari website berlaku 10 menit,
-// lalu kembali ke auto schedule kalau work mode true.
-const unsigned long MANUAL_FLASH_DURATION_MS = 10UL * 60UL * 1000UL;
+// Manual flash dari website TIDAK ADA TIMEOUT.
+// Flash ON akan tetap ON sampai klik Flash OFF atau Flash AUTO.
 
 // =====================================================
 // AI THINKER ESP32-CAM PIN CONFIGURATION
@@ -85,9 +84,13 @@ int lastCaptureYDay = -1;
 int lastCaptureHour = -1;
 
 bool flashState = false;
+
+// manualFlashOverride = true berarti flash dikontrol manual dari website.
+// manualFlashState = true  berarti paksa ON.
+// manualFlashState = false berarti paksa OFF.
+// Kalau ingin kembali otomatis, buka /flash/auto.
 bool manualFlashOverride = false;
 bool manualFlashState = false;
-unsigned long manualFlashUntil = 0;
 
 unsigned long lastTimePrint = 0;
 
@@ -195,7 +198,7 @@ static const char MAIN_PAGE[] PROGMEM = R"rawliteral(
   <div class="box">
     <h2>Work Mode</h2>
     <p>
-      Work Mode ON = foto otomatis tiap jam + flash ON jam 19:00 sampai 06:00.
+      Work Mode ON = foto otomatis tiap jam + flash AUTO ON jam 19:00 sampai 06:00.
     </p>
 
     <button onclick="fetch('/work/on').then(() => alert('Work Mode ON'))">
@@ -214,11 +217,11 @@ static const char MAIN_PAGE[] PROGMEM = R"rawliteral(
   <div class="box">
     <h2>Flash Control</h2>
 
-    <button onclick="fetch('/flash/on').then(() => alert('Flash ON'))">
+    <button onclick="fetch('/flash/on').then(() => alert('Flash ON - tetap menyala sampai Flash OFF atau AUTO'))">
       Flash ON
     </button>
 
-    <button class="danger" onclick="fetch('/flash/off').then(() => alert('Flash OFF'))">
+    <button class="danger" onclick="fetch('/flash/off').then(() => alert('Flash OFF - tetap mati sampai Flash ON atau AUTO'))">
       Flash OFF
     </button>
 
@@ -227,7 +230,7 @@ static const char MAIN_PAGE[] PROGMEM = R"rawliteral(
     </button>
 
     <p class="small">
-      Manual flash berlaku 10 menit, lalu kembali auto kalau Work Mode ON.
+      Flash ON akan menyala terus sampai kamu klik Flash OFF atau Flash AUTO.
     </p>
   </div>
 
@@ -301,25 +304,24 @@ void applyFlashState(bool state) {
 }
 
 void updateFlashSchedule() {
-  // Kalau work mode false, auto flash tidak berjalan.
-  // Flash juga dipaksa OFF agar aman.
+  // Prioritas tertinggi: manual override dari website.
+  // Jadi meskipun Work Mode OFF, Flash ON tetap menyala
+  // sampai user klik Flash OFF atau Flash AUTO.
+  if (manualFlashOverride) {
+    if (flashState != manualFlashState) {
+      applyFlashState(manualFlashState);
+    }
+    return;
+  }
+
+  // Kalau Work Mode OFF dan tidak ada manual override,
+  // flash otomatis dipaksa OFF.
   if (!workModeEnabled) {
     if (flashState) {
       applyFlashState(false);
       Serial.println("[FLASH] Work mode OFF. Flash forced OFF.");
     }
     return;
-  }
-
-  // Manual override dari website.
-  if (manualFlashOverride) {
-    if (millis() < manualFlashUntil) {
-      applyFlashState(manualFlashState);
-      return;
-    }
-
-    manualFlashOverride = false;
-    Serial.println("[FLASH] Manual override expired. Back to auto schedule.");
   }
 
   struct tm timeInfo;
@@ -540,8 +542,9 @@ static esp_err_t manualCaptureHandler(httpd_req_t* req) {
 
 static esp_err_t workOnHandler(httpd_req_t* req) {
   workModeEnabled = true;
+
+  // Work Mode ON mengembalikan flash ke AUTO schedule.
   manualFlashOverride = false;
-  manualFlashUntil = 0;
 
   updateFlashSchedule();
 
@@ -563,16 +566,16 @@ static esp_err_t workOnHandler(httpd_req_t* req) {
 
   return httpd_resp_send(
     req,
-    "{\"success\":true,\"work_mode\":true,\"message\":\"Work mode enabled\"}",
+    "{\"success\":true,\"work_mode\":true,\"flash_mode\":\"auto\",\"message\":\"Work mode enabled\"}",
     HTTPD_RESP_USE_STRLEN
   );
 }
 
 static esp_err_t workOffHandler(httpd_req_t* req) {
   workModeEnabled = false;
-  manualFlashOverride = false;
-  manualFlashUntil = 0;
 
+  // Work Mode OFF juga keluar dari auto/manual schedule dan mematikan flash.
+  manualFlashOverride = false;
   applyFlashState(false);
 
   httpd_resp_set_type(req, "application/json");
@@ -580,7 +583,7 @@ static esp_err_t workOffHandler(httpd_req_t* req) {
 
   return httpd_resp_send(
     req,
-    "{\"success\":true,\"work_mode\":false,\"message\":\"Work mode disabled\"}",
+    "{\"success\":true,\"work_mode\":false,\"flash_state\":\"off\",\"message\":\"Work mode disabled\"}",
     HTTPD_RESP_USE_STRLEN
   );
 }
@@ -620,9 +623,15 @@ static esp_err_t statusHandler(httpd_req_t* req) {
   json += "\"flash_state\":\"";
   json += (flashState ? "on" : "off");
   json += "\",";
+  json += "\"flash_mode\":\"";
+  json += (manualFlashOverride ? "manual" : "auto");
+  json += "\",";
   json += "\"manual_flash_override\":";
   json += (manualFlashOverride ? "true" : "false");
   json += ",";
+  json += "\"manual_flash_state\":\"";
+  json += (manualFlashState ? "on" : "off");
+  json += "\",";
   json += "\"latest_photo_time\":\"";
   json += latestPhotoTime;
   json += "\",";
@@ -640,39 +649,48 @@ static esp_err_t statusHandler(httpd_req_t* req) {
 static esp_err_t flashOnHandler(httpd_req_t* req) {
   manualFlashOverride = true;
   manualFlashState = true;
-  manualFlashUntil = millis() + MANUAL_FLASH_DURATION_MS;
 
   applyFlashState(true);
 
   httpd_resp_set_type(req, "text/plain");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
 
-  return httpd_resp_send(req, "Flash ON manual override", HTTPD_RESP_USE_STRLEN);
+  return httpd_resp_send(
+    req,
+    "Flash ON manual override - persistent until Flash OFF or AUTO",
+    HTTPD_RESP_USE_STRLEN
+  );
 }
 
 static esp_err_t flashOffHandler(httpd_req_t* req) {
   manualFlashOverride = true;
   manualFlashState = false;
-  manualFlashUntil = millis() + MANUAL_FLASH_DURATION_MS;
 
   applyFlashState(false);
 
   httpd_resp_set_type(req, "text/plain");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
 
-  return httpd_resp_send(req, "Flash OFF manual override", HTTPD_RESP_USE_STRLEN);
+  return httpd_resp_send(
+    req,
+    "Flash OFF manual override - persistent until Flash ON or AUTO",
+    HTTPD_RESP_USE_STRLEN
+  );
 }
 
 static esp_err_t flashAutoHandler(httpd_req_t* req) {
   manualFlashOverride = false;
-  manualFlashUntil = 0;
 
   updateFlashSchedule();
 
   httpd_resp_set_type(req, "text/plain");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
 
-  return httpd_resp_send(req, "Flash AUTO mode", HTTPD_RESP_USE_STRLEN);
+  return httpd_resp_send(
+    req,
+    "Flash AUTO mode",
+    HTTPD_RESP_USE_STRLEN
+  );
 }
 
 // =====================================================
@@ -960,6 +978,18 @@ void setup() {
   Serial.print(WiFi.localIP());
   Serial.println("/work/off");
 
+  Serial.print("Flash ON    : http://");
+  Serial.print(WiFi.localIP());
+  Serial.println("/flash/on");
+
+  Serial.print("Flash OFF   : http://");
+  Serial.print(WiFi.localIP());
+  Serial.println("/flash/off");
+
+  Serial.print("Flash AUTO  : http://");
+  Serial.print(WiFi.localIP());
+  Serial.println("/flash/auto");
+
   Serial.print("Status      : http://");
   Serial.print(WiFi.localIP());
   Serial.println("/status");
@@ -989,6 +1019,8 @@ void loop() {
     Serial.print(workModeEnabled ? "ON" : "OFF");
     Serial.print(" | Flash: ");
     Serial.print(flashState ? "ON" : "OFF");
+    Serial.print(" | Flash Mode: ");
+    Serial.print(manualFlashOverride ? "MANUAL" : "AUTO");
     Serial.print(" | Latest photo: ");
     Serial.print(latestPhotoTime);
 
