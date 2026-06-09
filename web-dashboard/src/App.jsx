@@ -989,83 +989,56 @@ function CctvRealtimePanel() {
 }
 
 function Esp32CamPanel() {
-  const ESP32_CAM_URL = import.meta.env.VITE_ESP32_CAM_URL || "";
+  const ESP32_CAM_URL =
+    import.meta.env.VITE_ESP32_CAM_URL ||
+    "https://sets-maintain-nuke-trustee.trycloudflare.com/esp32cam.jpg";
+
+  const ESP32_CAM_BASE_URL =
+    import.meta.env.VITE_ESP32_CAM_BASE_URL ||
+    "https://sets-maintain-nuke-trustee.trycloudflare.com";
+
   const [refreshKey, setRefreshKey] = useState(Date.now());
   const [flashLoading, setFlashLoading] = useState(false);
-  const [flashMessage, setFlashMessage] = useState("");
 
   useEffect(() => {
-    if (!ESP32_CAM_URL) return;
-
-    const interval = setInterval(() => {
+    const timer = setInterval(() => {
       setRefreshKey(Date.now());
-    }, 5000);
+    }, 3000);
 
-    return () => clearInterval(interval);
-  }, [ESP32_CAM_URL]);
+    return () => clearInterval(timer);
+  }, []);
 
-  const controlEsp32Flash = async (state) => {
-    if (!ESP32_CAM_URL) {
-      setFlashMessage("ESP32-CAM URL belum dikonfigurasi.");
-      return;
-    }
+  const imageUrl = `${ESP32_CAM_URL}?t=${refreshKey}`;
 
+  async function setFlash(state) {
     try {
       setFlashLoading(true);
-      setFlashMessage("");
 
-      const isVercelWebsite = window.location.hostname.includes("vercel.app");
+      const response = await fetch(`${ESP32_CAM_BASE_URL}/esp32cam/flash/${state}`);
+      const data = await response.json();
 
-      let requestUrl = "";
-
-      if (isVercelWebsite) {
-        requestUrl = `/api/esp32cam-flash?state=${state}`;
-      } else {
-        const localUrl = new URL(ESP32_CAM_URL);
-        localUrl.pathname = `/flash/${state}`;
-        localUrl.search = "";
-        requestUrl = localUrl.toString();
-      }
-
-      const response = await fetch(requestUrl);
-      const result = await response.json().catch(() => null);
-
-      if (!response.ok) {
-        throw new Error(result?.message || `Flash ${state} gagal.`);
-      }
-
-      setFlashMessage(`Flash ${state.toUpperCase()} berhasil dikirim.`);
+      console.log("ESP32-CAM flash response:", data);
     } catch (error) {
-      setFlashMessage(error.message || `Flash ${state} gagal.`);
+      console.error("ESP32-CAM flash error:", error);
+      alert("Failed to control ESP32-CAM flash");
     } finally {
       setFlashLoading(false);
     }
-  };
-
-  if (!ESP32_CAM_URL) {
-    return (
-      <div className="cctv-placeholder">
-        <h3>ESP32-CAM belum disambungkan</h3>
-        <p>
-          Masukkan URL ESP32-CAM ke file .env dengan nama VITE_ESP32_CAM_URL.
-        </p>
-      </div>
-    );
   }
 
-  const isVercelWebsite = window.location.hostname.includes("vercel.app");
-
-  const imageUrl = isVercelWebsite
-    ? `/api/esp32cam?t=${refreshKey}`
-    : `${ESP32_CAM_URL}?t=${refreshKey}`;
-
   return (
-    <div className="cctv-live-layout">
-      <div className="cctv-wrapper">
-        <img src={imageUrl} alt="ESP32-CAM Realtime" />
+    <div className="esp32cam-live-layout">
+      <div className="esp32cam-wrapper">
+        <img
+          src={imageUrl}
+          alt="ESP32-CAM Realtime"
+          onError={() => {
+            console.error("ESP32-CAM failed to load:", imageUrl);
+          }}
+        />
       </div>
 
-      <div className="cctv-info">
+      <div className="esp32cam-info">
         <h3>ESP32-CAM Additional Camera</h3>
 
         <p>
@@ -1075,26 +1048,27 @@ function Esp32CamPanel() {
         <p>Source:</p>
         <code>{ESP32_CAM_URL}</code>
 
-        <div className="action-row" style={{ marginTop: "14px" }}>
+        <div className="button-row">
           <button
-            type="button"
+            className="btn-green"
             disabled={flashLoading}
-            onClick={() => controlEsp32Flash("on")}
+            onClick={() => setFlash("on")}
           >
-            {flashLoading ? "Loading..." : "Flash ON"}
+            Flash ON
           </button>
 
           <button
-            type="button"
-            className="danger"
+            className="btn-red"
             disabled={flashLoading}
-            onClick={() => controlEsp32Flash("off")}
+            onClick={() => setFlash("off")}
           >
-            {flashLoading ? "Loading..." : "Flash OFF"}
+            Flash OFF
           </button>
         </div>
 
-        {flashMessage && <p className="note">{flashMessage}</p>}
+        <p className="note" style={{ marginTop: "14px" }}>
+          Mode: snapshot refresh setiap 3 detik.
+        </p>
       </div>
     </div>
   );

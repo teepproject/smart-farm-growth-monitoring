@@ -7,8 +7,8 @@
 // =====================================================
 // WIFI CONFIGURATION
 // =====================================================
-const char* WIFI_SSID = "qwertyuiop";
-const char* WIFI_PASSWORD = "00000000";
+const char* WIFI_SSID = "K410";
+const char* WIFI_PASSWORD = "amaap67674";
 
 // =====================================================
 // WORK MODE CONFIGURATION
