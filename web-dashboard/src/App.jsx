@@ -999,36 +999,63 @@ function Esp32CamPanel() {
 
   const [refreshKey, setRefreshKey] = useState(Date.now());
   const [flashLoading, setFlashLoading] = useState(false);
+  const [flashMessage, setFlashMessage] = useState("");
 
   useEffect(() => {
-    const timer = setInterval(() => {
+    const interval = setInterval(() => {
       setRefreshKey(Date.now());
     }, 3000);
 
-    return () => clearInterval(timer);
+    return () => clearInterval(interval);
   }, []);
 
   const imageUrl = `${ESP32_CAM_URL}?t=${refreshKey}`;
 
-  async function setFlash(state) {
+  async function controlEsp32Flash(state) {
+    const requestUrl = `${ESP32_CAM_BASE_URL}/esp32cam/flash/${state}`;
+
     try {
       setFlashLoading(true);
+      setFlashMessage(`Mengirim Flash ${state.toUpperCase()}...`);
 
-      const response = await fetch(`${ESP32_CAM_BASE_URL}/esp32cam/flash/${state}`);
-      const data = await response.json();
+      const response = await fetch(requestUrl, {
+        method: "GET",
+        cache: "no-store",
+      });
 
-      console.log("ESP32-CAM flash response:", data);
+      const text = await response.text();
+
+      let result = null;
+      try {
+        result = JSON.parse(text);
+      } catch {
+        result = { response: text };
+      }
+
+      if (!response.ok) {
+        throw new Error(
+          `ESP32-CAM flash request failed. Status: ${response.status}. URL: ${requestUrl}`
+        );
+      }
+
+      setFlashMessage(
+        `Flash ${state.toUpperCase()} berhasil. ${
+          result?.response ? `Response: ${result.response}` : ""
+        }`
+      );
+
+      console.log("ESP32-CAM flash success:", result);
     } catch (error) {
       console.error("ESP32-CAM flash error:", error);
-      alert("Failed to control ESP32-CAM flash");
+      setFlashMessage(error.message || `Flash ${state} gagal.`);
     } finally {
       setFlashLoading(false);
     }
   }
 
   return (
-    <div className="esp32cam-live-layout">
-      <div className="esp32cam-wrapper">
+    <div className="cctv-live-layout">
+      <div className="cctv-wrapper">
         <img
           src={imageUrl}
           alt="ESP32-CAM Realtime"
@@ -1038,7 +1065,7 @@ function Esp32CamPanel() {
         />
       </div>
 
-      <div className="esp32cam-info">
+      <div className="cctv-info">
         <h3>ESP32-CAM Additional Camera</h3>
 
         <p>
@@ -1048,23 +1075,26 @@ function Esp32CamPanel() {
         <p>Source:</p>
         <code>{ESP32_CAM_URL}</code>
 
-        <div className="button-row">
+        <div className="action-row" style={{ marginTop: "14px" }}>
           <button
-            className="btn-green"
+            type="button"
             disabled={flashLoading}
-            onClick={() => setFlash("on")}
+            onClick={() => controlEsp32Flash("on")}
           >
-            Flash ON
+            {flashLoading ? "Loading..." : "Flash ON"}
           </button>
 
           <button
-            className="btn-red"
+            type="button"
+            className="danger"
             disabled={flashLoading}
-            onClick={() => setFlash("off")}
+            onClick={() => controlEsp32Flash("off")}
           >
-            Flash OFF
+            {flashLoading ? "Loading..." : "Flash OFF"}
           </button>
         </div>
+
+        {flashMessage && <p className="note">{flashMessage}</p>}
 
         <p className="note" style={{ marginTop: "14px" }}>
           Mode: snapshot refresh setiap 3 detik.
