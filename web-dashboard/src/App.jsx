@@ -11,6 +11,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import "./App.css";
+import JSZip from "jszip";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -24,6 +25,42 @@ const supabase = isSupabaseReady
 const SENSOR_TABLE = "sensor_readings";
 const COMMAND_TABLE = "device_commands";
 const CAMERA_TABLE = "camera_captures";
+
+const CCTV_STORAGE_BUCKET =
+  import.meta.env.VITE_CCTV_STORAGE_BUCKET || "cctv-captures";
+
+const ESP32_CAM_STORAGE_BUCKET =
+  import.meta.env.VITE_ESP32_CAM_STORAGE_BUCKET || "esp32-cam-captures";
+
+const ESP32_CAM_TABLE_CANDIDATES = [
+  "esp32cam_captures",
+  "esp32_cam_captures",
+  "esp32_captures",
+  CAMERA_TABLE,
+];
+
+const IMAGE_URL_COLUMNS = [
+  "image_url",
+  "public_url",
+  "url",
+  "signed_url",
+  "download_url",
+];
+
+const IMAGE_PATH_COLUMNS = [
+  "image_path",
+  "storage_path",
+  "path",
+  "file_path",
+  "object_path",
+];
+
+const IMAGE_BUCKET_COLUMNS = [
+  "bucket",
+  "bucket_id",
+  "storage_bucket",
+  "image_bucket",
+];
 
 const REALTIME_WINDOW_MS = 60 * 1000;
 const DASHBOARD_POLL_MS = 3000;
@@ -174,20 +211,6 @@ function App() {
     });
   }
 
-  function downloadEsp32CamCSV() {
-    const params = new URLSearchParams();
-
-    if (csvStartDate) {
-      params.set("start", new Date(csvStartDate).toISOString());
-    }
-
-    if (csvEndDate) {
-      params.set("end", new Date(csvEndDate).toISOString());
-    }
-
-    window.open(`/api/esp32cam-captures-csv?${params.toString()}`, "_blank");
-  }
-
   async function downloadSupabaseTableCSV(tableName, filePrefix, label) {
     if (!supabase) {
       setActionMessage("Supabase is not ready. Check the environment configuration.");
@@ -270,8 +293,234 @@ function App() {
     setActionMessage(`${label} downloaded successfully. Total rows: ${data.length}.`);
   }
 
+  function getSelectedDownloadPeriod() {
+    const startDate = csvStartDate ? new Date(csvStartDate) : null;
+    const endDate = csvEndDate ? new Date(csvEndDate) : null;
+
+    if (startDate && Number.isNaN(startDate.getTime())) {
+      return {
+        error: "Start date is invalid.",
+      };
+    }
+
+    if (endDate && Number.isNaN(endDate.getTime())) {
+      return {
+        error: "End date is invalid.",
+      };
+    }
+
+    if (startDate && endDate && startDate > endDate) {
+      return {
+        error: "Start date cannot be later than end date.",
+      };
+    }
+
+    return {
+      startDate,
+      endDate,
+    };
+  }
+
+  async function fetchRowsByPeriod(tableName, startDate, endDate) {
+    let query = supabase.from(tableName).select("*");
+
+    if (startDate) {
+      query = query.gte("created_at", startDate.toISOString());
+    }
+
+    if (endDate) {
+      query = query.lte("created_at", endDate.toISOString());
+    }
+
+    query = query.order("created_at", { ascending: true }).limit(10000);
+
+    return query;
+  }
+
+  async function downloadImageZipFromRows({
+    rows,
+    filePrefix,
+    label,
+    defaultBucket,
+    rowFilter = () => true,
+  }) {
+    const filteredRows = (rows || [])
+      .filter(rowFilter)
+      .filter((row) => hasImageReference(row));
+
+    if (filteredRows.length === 0) {
+      setActionMessage(`No ${label} image data found for the selected period.`);
+      return false;
+    }
+
+    setActionMessage(`Preparing ${label} ZIP. Total image rows: ${filteredRows.length}...`);
+
+    const zip = new JSZip();
+    const folder = zip.folder(label);
+    let addedCount = 0;
+    let failedCount = 0;
+
+    for (const row of filteredRows) {
+      try {
+        const imageResult = await getImageBlobFromRow(row, defaultBucket);
+
+        if (!imageResult?.blob) {
+          failedCount += 1;
+          continue;
+        }
+
+        const filename = buildImageFilename(row, imageResult.sourceName, addedCount + 1);
+        folder.file(filename, imageResult.blob);
+        addedCount += 1;
+      } catch (error) {
+        failedCount += 1;
+        console.error(`Failed to add ${label} image to ZIP:`, error, row);
+      }
+    }
+
+    if (addedCount === 0) {
+      setActionMessage(
+        `No ${label} image could be downloaded. Check image_url/storage_path and Supabase Storage policy.`
+      );
+      return false;
+    }
+
+    const zipBlob = await zip.generateAsync({
+      type: "blob",
+      compression: "DEFLATE",
+      compressionOptions: {
+        level: 6,
+      },
+    });
+
+    const startLabel = csvStartDate || "start";
+    const endLabel = csvEndDate || "end";
+    const periodLabel = `${startLabel}_to_${endLabel}`
+      .replaceAll(":", "-")
+      .replaceAll("T", "_");
+
+    saveBlobAsFile(zipBlob, `${filePrefix}-${periodLabel}.zip`);
+
+    const failedMessage =
+      failedCount > 0 ? ` ${failedCount} image(s) failed to download.` : "";
+
+    setActionMessage(
+      `${label} ZIP downloaded successfully. Total images: ${addedCount}.${failedMessage}`
+    );
+
+    return true;
+  }
+
+  async function downloadImageZipFromTable({
+    tableName,
+    filePrefix,
+    label,
+    defaultBucket,
+    rowFilter = () => true,
+  }) {
+    if (!supabase) {
+      setActionMessage("Supabase is not ready. Check the environment configuration.");
+      return false;
+    }
+
+    setActionMessage("");
+
+    const period = getSelectedDownloadPeriod();
+
+    if (period.error) {
+      setActionMessage(period.error);
+      return false;
+    }
+
+    const { data, error } = await fetchRowsByPeriod(
+      tableName,
+      period.startDate,
+      period.endDate
+    );
+
+    if (error) {
+      setActionMessage(`Failed to read ${label} table "${tableName}": ${error.message}`);
+      return false;
+    }
+
+    return downloadImageZipFromRows({
+      rows: data,
+      filePrefix,
+      label,
+      defaultBucket,
+      rowFilter,
+    });
+  }
+
   async function downloadCctvData() {
-    await downloadSupabaseTableCSV(CAMERA_TABLE, "smart-farm-cctv-data", "CCTV data");
+    await downloadImageZipFromTable({
+      tableName: CAMERA_TABLE,
+      filePrefix: "smart-farm-cctv-images",
+      label: "CCTV",
+      defaultBucket: CCTV_STORAGE_BUCKET,
+      rowFilter: (row) => !isEsp32CaptureRow(row),
+    });
+  }
+
+  async function downloadEsp32CamData() {
+    if (!supabase) {
+      setActionMessage("Supabase is not ready. Check the environment configuration.");
+      return;
+    }
+
+    setActionMessage("");
+
+    const period = getSelectedDownloadPeriod();
+
+    if (period.error) {
+      setActionMessage(period.error);
+      return;
+    }
+
+    let lastError = null;
+
+    for (const tableName of ESP32_CAM_TABLE_CANDIDATES) {
+      const { data, error } = await fetchRowsByPeriod(
+        tableName,
+        period.startDate,
+        period.endDate
+      );
+
+      if (error) {
+        lastError = error;
+        console.warn(`ESP32-CAM table "${tableName}" could not be used:`, error);
+        continue;
+      }
+
+      const rowFilter =
+        tableName === CAMERA_TABLE ? (row) => isEsp32CaptureRow(row) : () => true;
+
+      const imageRows = (data || []).filter(rowFilter).filter(hasImageReference);
+
+      if (imageRows.length === 0) {
+        continue;
+      }
+
+      const downloaded = await downloadImageZipFromRows({
+        rows: imageRows,
+        filePrefix: "smart-farm-esp32-cam-images",
+        label: "ESP32-CAM",
+        defaultBucket: ESP32_CAM_STORAGE_BUCKET,
+      });
+
+      if (downloaded) {
+        return;
+      }
+    }
+
+    if (lastError) {
+      setActionMessage(
+        `No ESP32-CAM image data found. Last table error: ${lastError.message}`
+      );
+      return;
+    }
+
+    setActionMessage("No ESP32-CAM image data found for the selected period.");
   }
 
   function setCsvPresetHours(hours) {
@@ -639,15 +888,16 @@ function App() {
 
                 <button onClick={downloadCctvData}>Download CCTV Data</button>
 
-                <button onClick={downloadEsp32CamCSV}>
+                <button onClick={downloadEsp32CamData}>
                   Download ESP32-CAM Data
                 </button>
               </div>
 
               <p className="note">
                 CSV will be generated from the sensor table based on the{" "}
-                <b>created_at</b> column. If you choose “All Data”, the current
-                temporary limit is 10,000 rows.
+                <b>created_at</b> column. CCTV and ESP32-CAM buttons will download
+                captured image files as a ZIP based on the same selected period.
+                If you choose “All Data”, the current temporary limit is 10,000 rows.
               </p>
             </div>
 
@@ -1155,6 +1405,222 @@ function Esp32CamPanel() {
       </div>
     </div>
   );
+}
+
+function hasImageReference(row) {
+  return Boolean(
+    getFirstStringValue(row, IMAGE_URL_COLUMNS) ||
+      getFirstStringValue(row, IMAGE_PATH_COLUMNS)
+  );
+}
+
+function isEsp32CaptureRow(row) {
+  const searchableText = [
+    row?.camera_id,
+    row?.device_id,
+    row?.source,
+    row?.type,
+    row?.name,
+    row?.note,
+    row?.payload?.camera_id,
+    row?.payload?.device_id,
+    row?.payload?.source,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  return (
+    searchableText.includes("esp32") ||
+    searchableText.includes("esp32-cam") ||
+    searchableText.includes("esp32cam")
+  );
+}
+
+function getFirstStringValue(row, columns) {
+  for (const column of columns) {
+    const value =
+      row?.[column] ??
+      row?.payload?.[column] ??
+      row?.metadata?.[column] ??
+      row?.data?.[column];
+
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return "";
+}
+
+async function getImageBlobFromRow(row, defaultBucket) {
+  const storageReference = getStorageReferenceFromRow(row, defaultBucket);
+
+  if (storageReference && supabase) {
+    const { data, error } = await supabase.storage
+      .from(storageReference.bucket)
+      .download(storageReference.path);
+
+    if (!error && data) {
+      return {
+        blob: data,
+        sourceName: storageReference.path,
+      };
+    }
+
+    console.warn("Supabase Storage download failed. Trying image URL instead.", {
+      error,
+      storageReference,
+      row,
+    });
+  }
+
+  const imageUrl = getFirstStringValue(row, IMAGE_URL_COLUMNS);
+
+  if (!imageUrl) {
+    return null;
+  }
+
+  const response = await fetch(imageUrl, {
+    method: "GET",
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error(`Image URL download failed with status ${response.status}`);
+  }
+
+  const blob = await response.blob();
+
+  return {
+    blob,
+    sourceName: imageUrl,
+  };
+}
+
+function getStorageReferenceFromRow(row, defaultBucket) {
+  const imageUrl = getFirstStringValue(row, IMAGE_URL_COLUMNS);
+  const parsedFromUrl = parseSupabaseStorageUrl(imageUrl);
+
+  if (parsedFromUrl) {
+    return parsedFromUrl;
+  }
+
+  const bucket = getFirstStringValue(row, IMAGE_BUCKET_COLUMNS) || defaultBucket;
+  let path = getFirstStringValue(row, IMAGE_PATH_COLUMNS);
+
+  if (!bucket || !path) {
+    return null;
+  }
+
+  path = path.replace(/^\/+/, "");
+
+  if (path.startsWith(`${bucket}/`)) {
+    path = path.slice(bucket.length + 1);
+  }
+
+  return {
+    bucket,
+    path,
+  };
+}
+
+function parseSupabaseStorageUrl(url) {
+  if (!url || !url.includes("/storage/v1/object/")) {
+    return null;
+  }
+
+  try {
+    const parsedUrl = new URL(url);
+    const publicMarker = "/storage/v1/object/public/";
+    const signedMarker = "/storage/v1/object/sign/";
+
+    let objectPath = "";
+
+    if (parsedUrl.pathname.includes(publicMarker)) {
+      objectPath = parsedUrl.pathname.split(publicMarker)[1];
+    } else if (parsedUrl.pathname.includes(signedMarker)) {
+      objectPath = parsedUrl.pathname.split(signedMarker)[1];
+    }
+
+    if (!objectPath) {
+      return null;
+    }
+
+    const decodedPath = decodeURIComponent(objectPath);
+    const [bucket, ...pathParts] = decodedPath.split("/");
+    const path = pathParts.join("/");
+
+    if (!bucket || !path) {
+      return null;
+    }
+
+    return {
+      bucket,
+      path,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function buildImageFilename(row, sourceName, index) {
+  const date = row?.created_at ? new Date(row.created_at) : new Date();
+  const safeDate = Number.isNaN(date.getTime())
+    ? `image-${index}`
+    : date.toISOString().replaceAll(":", "-").replaceAll(".", "-");
+
+  const sourceFilename = getFilenameFromSource(sourceName);
+  const extension = getFileExtension(sourceFilename) || "png";
+  const baseName = removeFileExtension(sourceFilename) || `capture-${row?.id || index}`;
+
+  return `${safeDate}_${sanitizeFilename(baseName)}.${extension}`;
+}
+
+function getFilenameFromSource(sourceName) {
+  if (!sourceName) return "";
+
+  try {
+    if (sourceName.startsWith("http://") || sourceName.startsWith("https://")) {
+      const url = new URL(sourceName);
+      const pathParts = url.pathname.split("/").filter(Boolean);
+      return pathParts[pathParts.length - 1] || "";
+    }
+
+    const pathParts = sourceName.split("/").filter(Boolean);
+    return pathParts[pathParts.length - 1] || "";
+  } catch {
+    const pathParts = String(sourceName).split("/").filter(Boolean);
+    return pathParts[pathParts.length - 1] || "";
+  }
+}
+
+function getFileExtension(filename) {
+  const match = String(filename || "").match(/\.([a-zA-Z0-9]+)$/);
+  return match ? match[1].toLowerCase() : "";
+}
+
+function removeFileExtension(filename) {
+  return String(filename || "").replace(/\.[a-zA-Z0-9]+$/, "");
+}
+
+function sanitizeFilename(value) {
+  return String(value || "capture")
+    .replace(/[^a-zA-Z0-9._-]/g, "_")
+    .slice(0, 120);
+}
+
+function saveBlobAsFile(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 }
 
 function getSoilStatus(value) {
