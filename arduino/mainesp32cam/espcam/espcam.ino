@@ -63,12 +63,21 @@ const int FLASH_OFF_HOUR = 6;   // 6 AM
 // =====================================================
 // CAMERA SETTINGS
 // =====================================================
-// Sensor kamu sebelumnya tidak support JPEG langsung,
-// jadi pakai RGB565 lalu convert ke JPG.
-#define CAMERA_FRAME_SIZE FRAMESIZE_QQVGA   // 160x120, paling stabil
-#define CAMERA_JPG_QUALITY 15               // 10 bagus, 15 lebih ringan
+// Sensor kamera kamu memberi error:
+// "JPEG format is not supported on this sensor".
+// Jadi kita pakai RGB565 lalu dikonversi ke JPG oleh ESP32.
+//
+// FRAMESIZE_QQVGA = 160x120, paling ringan tapi pecah.
+// FRAMESIZE_QVGA  = 320x240, lebih jelas dan biasanya stabil.
+// FRAMESIZE_VGA   = 640x480, lebih bagus tapi lebih berat.
+#define CAMERA_FRAME_SIZE FRAMESIZE_QVGA
+
+// Nilai kecil = kualitas lebih bagus, ukuran file lebih besar.
+// Untuk mode RGB565 convert, 12 adalah titik aman.
+#define CAMERA_JPG_QUALITY 12
 
 httpd_handle_t cameraServer = NULL;
+String cameraMode = "RGB565_convert";
 
 // =====================================================
 // GLOBAL STATE
@@ -115,8 +124,11 @@ static const char MAIN_PAGE[] PROGMEM = R"rawliteral(
     }
 
     img {
-      width: 320px;
+      width: 640px;
       max-width: 95%;
+      height: auto;
+      object-fit: contain;
+      image-rendering: auto;
       border: 3px solid white;
       border-radius: 12px;
       background: black;
@@ -357,6 +369,27 @@ bool captureJpgToBuffer(uint8_t** outBuffer, size_t* outLength) {
   uint8_t* jpgBuffer = NULL;
   size_t jpgLength = 0;
 
+  // Mode terbaik: kamera menghasilkan JPEG langsung.
+  // Kita copy buffer supaya aman setelah esp_camera_fb_return().
+  if (fb->format == PIXFORMAT_JPEG) {
+    jpgLength = fb->len;
+    jpgBuffer = (uint8_t*)malloc(jpgLength);
+
+    if (jpgBuffer == NULL) {
+      Serial.println("[ERROR] Not enough memory to copy JPG buffer");
+      esp_camera_fb_return(fb);
+      return false;
+    }
+
+    memcpy(jpgBuffer, fb->buf, jpgLength);
+    esp_camera_fb_return(fb);
+
+    *outBuffer = jpgBuffer;
+    *outLength = jpgLength;
+    return true;
+  }
+
+  // Fallback kalau suatu saat pixel_format bukan JPEG.
   bool converted = fmt2jpg(
     fb->buf,
     fb->len,
@@ -371,7 +404,7 @@ bool captureJpgToBuffer(uint8_t** outBuffer, size_t* outLength) {
   esp_camera_fb_return(fb);
 
   if (!converted || jpgBuffer == NULL || jpgLength == 0) {
-    Serial.println("[ERROR] RGB565 to JPG conversion failed");
+    Serial.println("[ERROR] Frame to JPG conversion failed");
 
     if (jpgBuffer != NULL) {
       free(jpgBuffer);
@@ -598,7 +631,9 @@ static esp_err_t statusHandler(httpd_req_t* req) {
 
   String json = "{";
   json += "\"device\":\"ESP32-CAM Smart Farm\",";
-  json += "\"mode\":\"RGB565_to_JPG\",";
+  json += "\"mode\":\"";
+  json += cameraMode;
+  json += "\",";
   json += "\"work_mode_enabled\":";
   json += (workModeEnabled ? "true" : "false");
   json += ",";
@@ -696,75 +731,137 @@ static esp_err_t flashAutoHandler(httpd_req_t* req) {
 // =====================================================
 // CAMERA SETUP
 // =====================================================
-void setupCamera() {
-  camera_config_t config;
+void fillCameraConfig(camera_config_t* config, pixformat_t pixelFormat, framesize_t frameSize) {
+  config->ledc_channel = LEDC_CHANNEL_0;
+  config->ledc_timer = LEDC_TIMER_0;
 
-  config.ledc_channel = LEDC_CHANNEL_0;
-  config.ledc_timer = LEDC_TIMER_0;
+  config->pin_d0 = Y2_GPIO_NUM;
+  config->pin_d1 = Y3_GPIO_NUM;
+  config->pin_d2 = Y4_GPIO_NUM;
+  config->pin_d3 = Y5_GPIO_NUM;
+  config->pin_d4 = Y6_GPIO_NUM;
+  config->pin_d5 = Y7_GPIO_NUM;
+  config->pin_d6 = Y8_GPIO_NUM;
+  config->pin_d7 = Y9_GPIO_NUM;
 
-  config.pin_d0 = Y2_GPIO_NUM;
-  config.pin_d1 = Y3_GPIO_NUM;
-  config.pin_d2 = Y4_GPIO_NUM;
-  config.pin_d3 = Y5_GPIO_NUM;
-  config.pin_d4 = Y6_GPIO_NUM;
-  config.pin_d5 = Y7_GPIO_NUM;
-  config.pin_d6 = Y8_GPIO_NUM;
-  config.pin_d7 = Y9_GPIO_NUM;
+  config->pin_xclk = XCLK_GPIO_NUM;
+  config->pin_pclk = PCLK_GPIO_NUM;
+  config->pin_vsync = VSYNC_GPIO_NUM;
+  config->pin_href = HREF_GPIO_NUM;
 
-  config.pin_xclk = XCLK_GPIO_NUM;
-  config.pin_pclk = PCLK_GPIO_NUM;
-  config.pin_vsync = VSYNC_GPIO_NUM;
-  config.pin_href = HREF_GPIO_NUM;
+  config->pin_sccb_sda = SIOD_GPIO_NUM;
+  config->pin_sccb_scl = SIOC_GPIO_NUM;
 
-  config.pin_sccb_sda = SIOD_GPIO_NUM;
-  config.pin_sccb_scl = SIOC_GPIO_NUM;
+  config->pin_pwdn = PWDN_GPIO_NUM;
+  config->pin_reset = RESET_GPIO_NUM;
 
-  config.pin_pwdn = PWDN_GPIO_NUM;
-  config.pin_reset = RESET_GPIO_NUM;
+  // 10 MHz sering lebih stabil untuk sensor yang tidak support JPEG langsung.
+  config->xclk_freq_hz = 10000000;
+  config->pixel_format = pixelFormat;
 
-  config.xclk_freq_hz = 10000000;
-  config.pixel_format = PIXFORMAT_RGB565;
-
-  config.frame_size = CAMERA_FRAME_SIZE;
-  config.jpeg_quality = CAMERA_JPG_QUALITY;
-  config.fb_count = 1;
-  config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
+  config->frame_size = frameSize;
+  config->jpeg_quality = CAMERA_JPG_QUALITY;
+  config->fb_count = 1;
+  config->grab_mode = CAMERA_GRAB_LATEST;
 
   if (psramFound()) {
-    config.fb_location = CAMERA_FB_IN_PSRAM;
+    config->fb_location = CAMERA_FB_IN_PSRAM;
+  } else {
+    config->fb_location = CAMERA_FB_IN_DRAM;
+  }
+}
+
+void applySensorSettings(framesize_t frameSize) {
+  sensor_t* sensor = esp_camera_sensor_get();
+
+  if (!sensor) {
+    Serial.println("[WARN] Camera sensor settings skipped.");
+    return;
+  }
+
+  sensor->set_framesize(sensor, frameSize);
+
+  // Orientasi gambar. Ubah 0 ke 1 kalau gambar terbalik.
+  sensor->set_vflip(sensor, 0);
+  sensor->set_hmirror(sensor, 0);
+
+  // Setting kualitas gambar.
+  sensor->set_brightness(sensor, 0);      // -2 sampai 2
+  sensor->set_contrast(sensor, 1);        // -2 sampai 2
+  sensor->set_saturation(sensor, 0);      // -2 sampai 2
+  sensor->set_special_effect(sensor, 0);  // 0 = normal
+
+  // Auto white balance dan exposure supaya warna lebih natural.
+  sensor->set_whitebal(sensor, 1);
+  sensor->set_awb_gain(sensor, 1);
+  sensor->set_wb_mode(sensor, 0);         // 0 = auto
+  sensor->set_exposure_ctrl(sensor, 1);
+  sensor->set_aec2(sensor, 1);
+  sensor->set_ae_level(sensor, 0);
+
+  // Auto gain untuk kondisi indoor/outdoor berubah-ubah.
+  sensor->set_gain_ctrl(sensor, 1);
+  sensor->set_agc_gain(sensor, 0);
+  sensor->set_gainceiling(sensor, (gainceiling_t)2);
+
+  // Koreksi noise, warna, dan lens shading.
+  sensor->set_bpc(sensor, 1);
+  sensor->set_wpc(sensor, 1);
+  sensor->set_raw_gma(sensor, 1);
+  sensor->set_lenc(sensor, 1);
+  sensor->set_dcw(sensor, 1);
+  sensor->set_colorbar(sensor, 0);
+}
+
+void setupCamera() {
+  Serial.println("[CAMERA] Starting camera...");
+
+  if (psramFound()) {
     Serial.println("[INFO] PSRAM found. Using PSRAM framebuffer.");
   } else {
-    config.fb_location = CAMERA_FB_IN_DRAM;
     Serial.println("[WARN] PSRAM not found. Using DRAM framebuffer.");
+    Serial.println("[WARN] If camera is unstable, use FRAMESIZE_QQVGA.");
   }
+
+  // Sensor kamu tidak support JPEG langsung, jadi default-nya RGB565.
+  // Ini menghindari error: JPEG format is not supported on this sensor.
+  camera_config_t config;
+  fillCameraConfig(&config, PIXFORMAT_RGB565, CAMERA_FRAME_SIZE);
 
   esp_err_t error = esp_camera_init(&config);
 
+  // Fallback otomatis ke resolusi paling aman jika QVGA/VGA gagal.
   if (error != ESP_OK) {
-    Serial.printf("[ERROR] Camera init failed: 0x%x\n", error);
-    Serial.println("[TIPS]");
-    Serial.println("1. Board: AI Thinker ESP32-CAM");
-    Serial.println("2. PSRAM: Enabled");
-    Serial.println("3. Partition Scheme: Huge APP");
-    Serial.println("4. Use stable 5V power supply");
-    delay(3000);
-    ESP.restart();
+    Serial.printf("[WARN] Camera init failed at selected size: 0x%x\n", error);
+    Serial.println("[WARN] Retrying with FRAMESIZE_QQVGA...");
+
+    esp_camera_deinit();
+    delay(500);
+
+    fillCameraConfig(&config, PIXFORMAT_RGB565, FRAMESIZE_QQVGA);
+    error = esp_camera_init(&config);
+
+    if (error != ESP_OK) {
+      Serial.printf("[ERROR] Camera init failed again: 0x%x\n", error);
+      Serial.println("[TIPS]");
+      Serial.println("1. Board: AI Thinker ESP32-CAM");
+      Serial.println("2. PSRAM: Enabled");
+      Serial.println("3. Partition Scheme: Huge APP");
+      Serial.println("4. Use stable 5V power supply");
+      Serial.println("5. Check camera ribbon cable direction and lock");
+      delay(3000);
+      ESP.restart();
+    }
+
+    cameraMode = "RGB565_convert_QQVGA_fallback";
+    applySensorSettings(FRAMESIZE_QQVGA);
+    Serial.println("[OK] Camera initialized in RGB565 fallback mode");
+    return;
   }
 
-  sensor_t* sensor = esp_camera_sensor_get();
-
-  if (sensor) {
-    sensor->set_vflip(sensor, 0);
-    sensor->set_hmirror(sensor, 0);
-    sensor->set_brightness(sensor, 0);
-    sensor->set_contrast(sensor, 0);
-    sensor->set_saturation(sensor, 0);
-    sensor->set_gain_ctrl(sensor, 1);
-    sensor->set_exposure_ctrl(sensor, 1);
-    sensor->set_whitebal(sensor, 1);
-  }
-
-  Serial.println("[OK] Camera initialized in RGB565 mode");
+  cameraMode = "RGB565_convert_QVGA";
+  applySensorSettings(CAMERA_FRAME_SIZE);
+  Serial.println("[OK] Camera initialized in RGB565 convert mode");
 }
 
 // =====================================================

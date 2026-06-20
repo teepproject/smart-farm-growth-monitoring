@@ -4,7 +4,8 @@
   ==========================================================
 
   Features:
-  - Soil moisture sensors A0-A5
+  - Soil moisture sensors A0-A4 only
+  - A5 disabled / not sent to telemetry
   - DHT22 on pin 39
   - RTC DS3231
   - Relay pin 8, 9, 10
@@ -57,26 +58,27 @@ const int RTC_COMPILE_TIME_OFFSET_HOURS = 0;
 // SOIL MOISTURE SETTINGS
 // ==================================================
 
-const int NUM_SENSORS = 6;
+const int NUM_SENSORS = 5;
 
 const int soilPins[NUM_SENSORS] = {
-  A0, A1, A2, A3, A4, A5
+  A0, A1, A2, A3, A4
 };
 
-// Latest calibration values from individual sensor testing:
-// A0 dry = 473, wet = 292
-// A1 dry = 478, wet = 299
-// A2 dry = 478, wet = 291
-// A3 dry = 483, wet = 291
-// A4 dry = 483, wet = 281
-// A5 is temporarily set the same as A4 because the A5 sensor is not installed yet.
-// After A5 is installed, recalibrate A5 separately.
+// Latest calibration values from your new calibration test:
+// A0 dry/air = 481, wet = 241
+// A1 dry/air = 484, wet = 217
+// A2 dry/air = 486, wet = 266
+// A3 dry/air = 493, wet = 258
+// A4 dry/air = 492, wet = 234
+// Important:
+// These dry values are taken from sensor in air / very dry condition.
+// If you later measure real dry soil, replace these dry values with the real dry-soil values.
 int dryValues[NUM_SENSORS] = {
-  473, 478, 478, 483, 483, 483
+  481, 484, 486, 493, 492
 };
 
 int wetValues[NUM_SENSORS] = {
-  292, 299, 291, 291, 281, 281
+  241, 217, 266, 258, 234
 };
 
 // Sensor readings are averaged to make the values more stable
@@ -161,9 +163,14 @@ bool testRelay3Done = false;
 const int wateringHour = 7;
 const int wateringMinute = 0;
 
+// This is the reference day for watering schedule.
+// Day 1: 22 June 2026. Zone 1, Zone 2, and Zone 3 water at 07:00.
+// Zone 2 repeats on day 4, 7, 10, ... from 22 June 2026.
+// Zone 3 repeats on day 7, 13, 19, ... from 22 June 2026.
+// Change this date if your experiment / planting start date is different.
 const int startYear = 2026;
 const int startMonth = 6;
-const int startDay = 1;
+const int startDay = 22;
 
 int lastWateredDayZone1 = -1;
 int lastWateredDayZone2 = -1;
@@ -653,7 +660,7 @@ void handleRealIrrigationSchedule(DateTime now, uint32_t currentTime) {
 void sendTelemetryToESP(DateTime now, float temperature, float humidity) {
   int zone1Avg = (moisturePercent[0] + moisturePercent[1]) / 2;
   int zone2Avg = (moisturePercent[2] + moisturePercent[3]) / 2;
-  int zone3Avg = (moisturePercent[4] + moisturePercent[5]) / 2;
+  int zone3Avg = moisturePercent[4];
 
   if (isnan(temperature)) {
     temperature = -1;
@@ -674,7 +681,8 @@ void sendTelemetryToESP(DateTime now, float temperature, float humidity) {
   payload += "\"soil_z2_s1\":" + String(moisturePercent[2]) + ",";
   payload += "\"soil_z2_s2\":" + String(moisturePercent[3]) + ",";
   payload += "\"soil_z3_s1\":" + String(moisturePercent[4]) + ",";
-  payload += "\"soil_z3_s2\":" + String(moisturePercent[5]) + ",";
+  // A5 / Zone 3 Sensor 2 is disabled for now.
+  // Do not send soil_z3_s2 to ESP8266 / ThingsBoard / Supabase.
 
   payload += "\"soil_z1_avg\":" + String(zone1Avg) + ",";
   payload += "\"soil_z2_avg\":" + String(zone2Avg) + ",";
@@ -685,7 +693,6 @@ void sendTelemetryToESP(DateTime now, float temperature, float humidity) {
   payload += "\"raw_a2\":" + String(rawValues[2]) + ",";
   payload += "\"raw_a3\":" + String(rawValues[3]) + ",";
   payload += "\"raw_a4\":" + String(rawValues[4]) + ",";
-  payload += "\"raw_a5\":" + String(rawValues[5]) + ",";
 
   payload += "\"temperature\":" + String(temperature, 1) + ",";
   payload += "\"humidity\":" + String(humidity, 1) + ",";
@@ -719,7 +726,7 @@ void sendTelemetryToESP(DateTime now, float temperature, float humidity) {
 void printMonitoringData(DateTime now, float temperature, float humidity) {
   int zone1Avg = (moisturePercent[0] + moisturePercent[1]) / 2;
   int zone2Avg = (moisturePercent[2] + moisturePercent[3]) / 2;
-  int zone3Avg = (moisturePercent[4] + moisturePercent[5]) / 2;
+  int zone3Avg = moisturePercent[4];
 
   Serial.println();
   Serial.println("========== Pakchoi Monitoring ==========");
@@ -774,11 +781,7 @@ void printMonitoringData(DateTime now, float temperature, float humidity) {
   Serial.print(moisturePercent[4]);
   Serial.println(" %");
 
-  Serial.print("A5 / Zone 3 Sensor 2 | Raw: ");
-  Serial.print(rawValues[5]);
-  Serial.print(" | Moisture: ");
-  Serial.print(moisturePercent[5]);
-  Serial.println(" %");
+  Serial.println("A5 / Zone 3 Sensor 2 | Disabled / not used");
 
   Serial.println("---------- Zone Average ----------");
 
@@ -846,7 +849,7 @@ void setup() {
 
   Serial.println("=====================================");
   Serial.println(" Pakchoi Smart Farming System");
-  Serial.println(" Soil calibrated A0-A5 + DHT22 + RTC GMT+08 + Relay + ESP8266 Telemetry");
+  Serial.println(" Soil calibrated A0-A4 only + DHT22 + RTC GMT+08 + Relay + ESP8266 Telemetry");
   Serial.println("=====================================");
   Serial.print("Serial1 to ESP8266 baud: ");
   Serial.println(espSerialBaud);
@@ -897,6 +900,7 @@ void setup() {
     Serial.println("Zone 1: every day at 07:00");
     Serial.println("Zone 2: every 3 days at 07:00");
     Serial.println("Zone 3: every 6 days at 07:00");
+    Serial.println("Start date / Day 1: 22/06/2026");
   }
 
   Serial.println("RTC found.");

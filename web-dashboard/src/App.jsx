@@ -599,13 +599,11 @@ function App() {
       "soil_a2",
       "soil_a3",
       "soil_a4",
-      "soil_a5",
       "soil_z1_s1",
       "soil_z1_s2",
       "soil_z2_s1",
       "soil_z2_s2",
       "soil_z3_s1",
-      "soil_z3_s2",
       "soil_z1_avg",
       "soil_z2_avg",
       "soil_z3_avg",
@@ -614,7 +612,6 @@ function App() {
       "raw_a2",
       "raw_a3",
       "raw_a4",
-      "raw_a5",
       "pump_1",
       "pump_2",
       "pump_3",
@@ -694,12 +691,18 @@ function App() {
   }, []);
 
   const soilSensors = [
-    { name: "A0", key: "soil_z1_s1" },
-    { name: "A1", key: "soil_z1_s2" },
-    { name: "A2", key: "soil_z2_s1" },
-    { name: "A3", key: "soil_z2_s2" },
-    { name: "A4", key: "soil_z3_s1" },
-    { name: "A5", key: "soil_z3_s2" },
+    { name: "A0", key: "soil_z1_s1", enabled: true },
+    { name: "A1", key: "soil_z1_s2", enabled: true },
+    { name: "A2", key: "soil_z2_s1", enabled: true },
+    { name: "A3", key: "soil_z2_s2", enabled: true },
+    { name: "A4", key: "soil_z3_s1", enabled: true },
+    {
+      name: "A5",
+      key: "soil_z3_s2",
+      enabled: false,
+      disabledText: "Disabled",
+      statusText: "Not used",
+    },
   ];
 
   const realtimeRows = [...history]
@@ -724,11 +727,11 @@ function App() {
     A2: toChartNumber(row.soil_z2_s1),
     A3: toChartNumber(row.soil_z2_s2),
     A4: toChartNumber(row.soil_z3_s1),
-    A5: toChartNumber(row.soil_z3_s2),
 
     zona1: average([row.soil_z1_s1, row.soil_z1_s2]),
     zona2: average([row.soil_z2_s1, row.soil_z2_s2]),
-    zona3: average([row.soil_z3_s1, row.soil_z3_s2]),
+    // A5 is disabled, so Zone 3 only uses A4 for now.
+    zona3: average([row.soil_z3_s1]),
   }));
 
   const deviceStatus = getDeviceStatus(latestData);
@@ -755,8 +758,8 @@ function App() {
         },
         {
           name: "Zone 3",
-          sensors: "A4 + A5",
-          value: average([latestData.soil_z3_s1, latestData.soil_z3_s2]),
+          sensors: "A4 only (A5 disabled)",
+          value: average([latestData.soil_z3_s1]),
           pump: pump3Status.value,
           pumpSource: pump3Status.source,
         },
@@ -937,9 +940,12 @@ function App() {
             <div className="soil-grid">
               {soilSensors.map((sensor) => (
                 <SoilCard
-                  key={sensor.key}
+                  key={sensor.name}
                   name={sensor.name}
-                  value={latestData[sensor.key]}
+                  value={sensor.enabled ? latestData[sensor.key] : null}
+                  enabled={sensor.enabled}
+                  disabledText={sensor.disabledText}
+                  statusText={sensor.statusText}
                 />
               ))}
             </div>
@@ -999,7 +1005,7 @@ function App() {
                       <td>{showValue(row.soil_z2_s1)}%</td>
                       <td>{showValue(row.soil_z2_s2)}%</td>
                       <td>{showValue(row.soil_z3_s1)}%</td>
-                      <td>{showValue(row.soil_z3_s2)}%</td>
+                      <td>Disabled</td>
                     </tr>
                   ))}
                 </tbody>
@@ -1147,7 +1153,33 @@ function ZoneCard({ name, sensors, value, pump, pumpSource }) {
   );
 }
 
-function SoilCard({ name, value }) {
+function SoilCard({
+  name,
+  value,
+  enabled = true,
+  disabledText = "Disabled",
+  statusText = "Not used",
+}) {
+  if (!enabled) {
+    return (
+      <div className="soil-card disabled-sensor">
+        <div className="soil-header">
+          <strong>Sensor {name}</strong>
+          <span>{disabledText}</span>
+        </div>
+
+        <div className="bar">
+          <div
+            className="bar-fill"
+            style={{ width: "100%", backgroundColor: "#475569" }}
+          />
+        </div>
+
+        <p className="soil-status">{statusText}</p>
+      </div>
+    );
+  }
+
   const numberValue = Number(value || 0);
   const status = getSoilStatus(numberValue);
 
@@ -1196,7 +1228,6 @@ function SoilRealtimeChart({ data }) {
           <Line type="linear" dataKey="A2" stroke="#ef4444" dot={false} connectNulls />
           <Line type="linear" dataKey="A3" stroke="#facc15" dot={false} connectNulls />
           <Line type="linear" dataKey="A4" stroke="#94a3b8" dot={false} connectNulls />
-          <Line type="linear" dataKey="A5" stroke="#a855f7" dot={false} connectNulls />
         </LineChart>
       </ResponsiveContainer>
     </div>
