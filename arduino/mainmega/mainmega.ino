@@ -64,21 +64,18 @@ const int soilPins[NUM_SENSORS] = {
   A0, A1, A2, A3, A4
 };
 
-// Latest calibration values from your new calibration test:
-// A0 dry/air = 481, wet = 241
-// A1 dry/air = 484, wet = 217
-// A2 dry/air = 486, wet = 266
-// A3 dry/air = 493, wet = 258
-// A4 dry/air = 492, wet = 234
+// Final calibration values using the powered USB hub power source.
+// DRY data source: USB hub powered, dry/air condition, CSV 18:37-18:43.
+// WET data source: USB hub powered, wet soil condition, CSV 19:00-19:10.
 // Important:
-// These dry values are taken from sensor in air / very dry condition.
-// If you later measure real dry soil, replace these dry values with the real dry-soil values.
+// Keep using the same powered USB hub for the final system.
+// If the power source changes again, analog readings may shift and calibration may need to be repeated.
 int dryValues[NUM_SENSORS] = {
-  481, 484, 486, 493, 492
+  447, 453, 452, 453, 459
 };
 
 int wetValues[NUM_SENSORS] = {
-  241, 217, 266, 258, 234
+  238, 189, 206, 213, 212
 };
 
 // Sensor readings are averaged to make the values more stable

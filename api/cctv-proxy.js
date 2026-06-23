@@ -1,7 +1,7 @@
 export default async function handler(req, res) {
   const CCTV_URL =
     process.env.CCTV_ZONE_1_URL ||
-    "https://credible-ceremony-species.ngrok-free.dev/cctv.jpg";
+    "https://string-efficiently-shaft-xbox.trycloudflare.com/cctv.jpg";
 
   try {
     const response = await fetch(CCTV_URL, {
