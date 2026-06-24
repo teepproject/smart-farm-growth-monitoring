@@ -21,12 +21,6 @@ export default async function handler(req, res) {
 
     const url = new URL(cameraUrl);
 
-    // Dari:
-    // https://xxxx.ngrok-free.dev/jpg
-    // Menjadi:
-    // https://xxxx.ngrok-free.dev/flash/on
-    // atau:
-    // https://xxxx.ngrok-free.dev/flash/off
     url.pathname = `/flash/${state}`;
     url.search = "";
 

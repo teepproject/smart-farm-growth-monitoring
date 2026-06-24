@@ -32,7 +32,7 @@ export default async function handler(req, res) {
       res.status(500).json({
         success: false,
         message:
-          "Supabase server config belum lengkap. Periksa VITE_SUPABASE_URL dan SUPABASE_SERVICE_ROLE_KEY.",
+          "The Supabase server configuration is incomplete. Check VITE_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.",
       });
       return;
     }

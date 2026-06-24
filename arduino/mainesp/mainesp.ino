@@ -3,15 +3,15 @@
   ESP8266 MAIN CODE - MEGA TELEMETRY + THINGSBOARD MQTT + RPC
   ==========================================================
 
-  Fungsi:
-  1. Menerima JSON telemetry dari Arduino Mega melalui SoftwareSerial.
-  2. Mengirim telemetry ke ThingsBoard via MQTT.
-  3. Menerima RPC dari ThingsBoard:
+  Functions:
+  1. Receives JSON telemetry from the Arduino Mega via SoftwareSerial.
+  2. Sends telemetry to ThingsBoard via MQTT.
+  3. Receives RPCs from ThingsBoard:
      - pump_1 true/false
      - pump_2 true/false
      - pump_3 true/false
      - reset_system true
-  4. Meneruskan command ke Arduino Mega dengan format:
+  4. Forwards commands to the Arduino Mega in the following format:
      CMD:PUMP_1_ON
      CMD:PUMP_1_OFF
      CMD:PUMP_2_ON

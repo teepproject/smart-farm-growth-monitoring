@@ -13,14 +13,14 @@ const char* WIFI_PASSWORD = "amaap67674";
 // =====================================================
 // WORK MODE CONFIGURATION
 // =====================================================
-// false = kamera tetap bisa tampil di website, tapi auto capture dan auto flash belum berjalan
-// true  = kamera mulai kerja: foto tiap 1 jam + flash otomatis ON 19:00 sampai 06:00
+// false = the camera can still be displayed on the website, but auto capture and auto flash are not yet active
+// true  = the camera starts working: takes a photo every hour + auto flash ON from 7:00 PM to 6:00 AM
 const bool DEFAULT_WORK_MODE_ENABLED = false;
 
 // =====================================================
 // TIME CONFIGURATION
 // =====================================================
-// Taiwan UTC+8. Kalau pakai WIB Indonesia, ubah menjadi 7 * 3600.
+// Taiwan UTC+8. If using Indonesia's WIB time zone, convert it to 7 * 3600.
 const long GMT_OFFSET_SECONDS = 8 * 3600;
 const int DAYLIGHT_OFFSET_SECONDS = 0;
 
@@ -33,8 +33,8 @@ const char* NTP_SERVER_2 = "time.google.com";
 const int FLASH_ON_HOUR = 19;   // 7 PM
 const int FLASH_OFF_HOUR = 6;   // 6 AM
 
-// Manual flash dari website TIDAK ADA TIMEOUT.
-// Flash ON akan tetap ON sampai klik Flash OFF atau Flash AUTO.
+// Manual flashing from the website has NO TIMEOUT.
+// Flash ON will remain ON until you click Flash OFF or Flash AUTO.
 
 // =====================================================
 // AI THINKER ESP32-CAM PIN CONFIGURATION

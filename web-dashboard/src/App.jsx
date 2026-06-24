@@ -1323,13 +1323,13 @@ function CctvRealtimePanel() {
 }
 
 function Esp32CamPanel() {
-  const ESP32_CAM_URL =
-    import.meta.env.VITE_ESP32_CAM_URL ||
-    "https://sets-maintain-nuke-trustee.trycloudflare.com/esp32cam.jpg";
-
-  const ESP32_CAM_BASE_URL =
+  const ESP32_CAM_BASE_URL = (
     import.meta.env.VITE_ESP32_CAM_BASE_URL ||
-    "https://sets-maintain-nuke-trustee.trycloudflare.com";
+    "https://achievement-cricket-all-robot.trycloudflare.com"
+  ).replace(/\/$/, "");
+
+  const ESP32_CAM_URL =
+    import.meta.env.VITE_ESP32_CAM_URL || `${ESP32_CAM_BASE_URL}/jpg`;
 
   const [refreshKey, setRefreshKey] = useState(Date.now());
   const [flashLoading, setFlashLoading] = useState(false);
@@ -1346,7 +1346,7 @@ function Esp32CamPanel() {
   const imageUrl = `${ESP32_CAM_URL}?t=${refreshKey}`;
 
   async function controlEsp32Flash(state) {
-    const requestUrl = `${ESP32_CAM_BASE_URL}/esp32cam/flash/${state}`;
+    const requestUrl = `${ESP32_CAM_BASE_URL}/flash/${state}`;
 
     try {
       setFlashLoading(true);
@@ -1359,26 +1359,14 @@ function Esp32CamPanel() {
 
       const text = await response.text();
 
-      let result = null;
-      try {
-        result = JSON.parse(text);
-      } catch {
-        result = { response: text };
-      }
-
       if (!response.ok) {
         throw new Error(
           `ESP32-CAM flash request failed. Status: ${response.status}. URL: ${requestUrl}`
         );
       }
 
-      setFlashMessage(
-        `Flash ${state.toUpperCase()} successful. ${
-          result?.response ? `Response: ${result.response}` : ""
-        }`
-      );
-
-      console.log("ESP32-CAM flash success:", result);
+      setFlashMessage(`Flash ${state.toUpperCase()} successful.`);
+      console.log("ESP32-CAM flash success:", text);
     } catch (error) {
       console.error("ESP32-CAM flash error:", error);
       setFlashMessage(error.message || `Flash ${state} failed.`);
