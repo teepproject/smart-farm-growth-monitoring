@@ -6,10 +6,10 @@ const ffmpegPath = require("ffmpeg-static");
 const app = express();
 const PORT = 5001;
 
-// CCTV RTSP URL yang sudah berhasil di VLC
+// CCTV RTSP URL that works in VLC
 const CCTV_RTSP_URL = "rtsp://192.168.0.237:554/Streaming/Channels/101";
 
-// ESP32-CAM IP dari Serial Monitor terbaru
+// Latest ESP32-CAM IP from the Serial Monitor
 const ESP32_CAM_BASE_URL = "http://192.168.0.148";
 
 app.use(cors());

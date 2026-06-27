@@ -1322,28 +1322,130 @@ function CctvRealtimePanel() {
   );
 }
 
-function Esp32CamPanel() {
-  const ESP32_CAM_BASE_URL = (
-    import.meta.env.VITE_ESP32_CAM_BASE_URL ||
-    "https://achievement-cricket-all-robot.trycloudflare.com"
-  ).replace(/\/$/, "");
+function CctvRealtimePanel() {
+  const RAW_CCTV_URL =
+    import.meta.env.VITE_CCTV_ZONE_1_URL ||
+    "https://string-efficiently-shaft-xbox.trycloudflare.com/cctv.jpg";
 
-  const ESP32_CAM_URL =
+  const CCTV_URL = (() => {
+    const cleanUrl = String(RAW_CCTV_URL).trim().replace(/\/$/, "");
+
+    if (
+      cleanUrl.includes("trycloudflare.com") &&
+      !cleanUrl.match(/\.(jpg|jpeg|png|webp)$/i)
+    ) {
+      return `${cleanUrl}/cctv.jpg`;
+    }
+
+    return cleanUrl;
+  })();
+
+  const [refreshKey, setRefreshKey] = useState(Date.now());
+  const [imageStatus, setImageStatus] = useState("loading");
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setImageStatus("loading");
+      setRefreshKey(Date.now());
+    }, 3000);
+
+    return () => clearInterval(timer);
+  }, []);
+
+  const imageUrl = `${CCTV_URL}${CCTV_URL.includes("?") ? "&" : "?"}t=${refreshKey}`;
+
+  return (
+    <div className="cctv-live-layout">
+      <div className="cctv-wrapper">
+        <img
+          src={imageUrl}
+          alt="CCTV Zone 1 Realtime"
+          onLoad={() => setImageStatus("connected")}
+          onError={() => {
+            setImageStatus("error");
+            console.error("CCTV failed to load:", imageUrl);
+          }}
+        />
+      </div>
+
+      <div className="cctv-info">
+        <h3>Zone 1 Live Camera</h3>
+
+        <p>
+          Status:{" "}
+          <b style={{ color: imageStatus === "error" ? "#ef4444" : "#22c55e" }}>
+            {imageStatus === "error" ? "Error" : "Connected"}
+          </b>
+        </p>
+
+        <p>Source:</p>
+        <code>{CCTV_URL}</code>
+
+        {imageStatus === "error" && (
+          <p className="note" style={{ marginTop: "14px", color: "#f87171" }}>
+            CCTV image failed to load. Open the source URL directly. If it does
+            not show an image, restart the CCTV Cloudflare tunnel.
+          </p>
+        )}
+
+        <p className="note" style={{ marginTop: "14px" }}>
+          Mode: snapshot refresh every 3 seconds.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function Esp32CamPanel() {
+  const RAW_ESP32_BASE_URL =
+    import.meta.env.VITE_ESP32_CAM_BASE_URL ||
+    "https://achievement-cricket-all-robot.trycloudflare.com";
+
+  const ESP32_CAM_BASE_URL = String(RAW_ESP32_BASE_URL)
+    .trim()
+    .replace(/\/$/, "")
+    .replace(/\/jpg$/, "")
+    .replace(/\/esp32cam\.jpg$/, "");
+
+  const RAW_ESP32_IMAGE_URL =
     import.meta.env.VITE_ESP32_CAM_URL || `${ESP32_CAM_BASE_URL}/jpg`;
+
+  const ESP32_CAM_URL = (() => {
+    const cleanUrl = String(RAW_ESP32_IMAGE_URL).trim().replace(/\/$/, "");
+
+    if (cleanUrl.endsWith("/jpg")) {
+      return cleanUrl;
+    }
+
+    if (cleanUrl.endsWith("/esp32cam.jpg")) {
+      return cleanUrl.replace(/\/esp32cam\.jpg$/, "/jpg");
+    }
+
+    if (
+      cleanUrl.includes("trycloudflare.com") &&
+      !cleanUrl.match(/\.(jpg|jpeg|png|webp)$/i)
+    ) {
+      return `${cleanUrl}/jpg`;
+    }
+
+    return cleanUrl;
+  })();
 
   const [refreshKey, setRefreshKey] = useState(Date.now());
   const [flashLoading, setFlashLoading] = useState(false);
   const [flashMessage, setFlashMessage] = useState("");
+  const [imageStatus, setImageStatus] = useState("loading");
 
   useEffect(() => {
     const interval = setInterval(() => {
+      setImageStatus("loading");
       setRefreshKey(Date.now());
     }, 3000);
 
     return () => clearInterval(interval);
   }, []);
 
-  const imageUrl = `${ESP32_CAM_URL}?t=${refreshKey}`;
+  const imageUrl = `${ESP32_CAM_URL}${ESP32_CAM_URL.includes("?") ? "&" : "?"}t=${refreshKey}`;
 
   async function controlEsp32Flash(state) {
     const requestUrl = `${ESP32_CAM_BASE_URL}/flash/${state}`;
@@ -1381,7 +1483,9 @@ function Esp32CamPanel() {
         <img
           src={imageUrl}
           alt="ESP32-CAM Realtime"
+          onLoad={() => setImageStatus("connected")}
           onError={() => {
+            setImageStatus("error");
             console.error("ESP32-CAM failed to load:", imageUrl);
           }}
         />
@@ -1391,7 +1495,10 @@ function Esp32CamPanel() {
         <h3>ESP32-CAM Additional Camera</h3>
 
         <p>
-          Status: <b>Connected</b>
+          Status:{" "}
+          <b style={{ color: imageStatus === "error" ? "#ef4444" : "#22c55e" }}>
+            {imageStatus === "error" ? "Error" : "Connected"}
+          </b>
         </p>
 
         <p>Source:</p>
@@ -1417,6 +1524,13 @@ function Esp32CamPanel() {
         </div>
 
         {flashMessage && <p className="note">{flashMessage}</p>}
+
+        {imageStatus === "error" && (
+          <p className="note" style={{ marginTop: "14px", color: "#f87171" }}>
+            ESP32-CAM image failed to load. Open the source URL directly. If it
+            does not show an image, restart the ESP32-CAM Cloudflare tunnel.
+          </p>
+        )}
 
         <p className="note" style={{ marginTop: "14px" }}>
           Mode: snapshot refresh every 3 seconds.
